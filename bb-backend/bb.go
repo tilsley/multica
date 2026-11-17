@@ -97,12 +97,14 @@ type bbTunables struct {
 	cancelTimeout  time.Duration // bound on POST /cancel
 }
 
-// bbTuning holds the defaults. bb heartbeats are expected every ~15-30s, so a
-// 10 minute silence window rides out several missed beats and short network
-// partitions while still failing a dead run long before the daemon's generic
-// 2h idle watchdog would.
+// bbTuning holds the defaults. 12 PUT attempts with a 30s cap is ~105-210s of
+// jittered backoff: enough to ride out a deploy or a minutes-long bb outage
+// (the compose 503 drill holds bb down for 60s) before the task fails. bb
+// heartbeats are expected every ~15-30s, so a 10 minute silence window rides
+// out several missed beats and short partitions while still failing a dead
+// run long before the daemon's generic 2h idle watchdog would.
 var bbTuning = bbTunables{
-	putAttempts:    8,
+	putAttempts:    12,
 	backoffBase:    500 * time.Millisecond,
 	backoffMax:     30 * time.Second,
 	silenceTimeout: 10 * time.Minute,

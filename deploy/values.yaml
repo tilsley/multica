@@ -1,0 +1,9 @@
+# Overrides for the OFFICIAL chart (upstream/deploy/helm/multica), phase 3.
+#   helm install multica ../upstream/deploy/helm/multica -n bb-test -f values.yaml
+# Only what differs from upstream defaults; the server/web/Postgres stay stock.
+images:
+  backend:
+    tag: v0.10.0   # keep == submodule tag (scripts/check-pins.sh)
+  frontend:
+    tag: v0.10.0
+existingSecret: multica-secrets

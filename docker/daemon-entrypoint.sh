@@ -30,4 +30,12 @@ until multica login --token "$MULTICA_PAT" >/dev/null; do
 done
 unset MULTICA_PAT
 
+# The foreground daemon writes to a rotating ~/.multica/daemon.log, not stdout.
+# Mirror it to stdout so `docker logs` / kubectl logs work (tail -F follows
+# rotation). Set MULTICA_DAEMON_LOG_STDOUT=0 to disable.
+if [ "${MULTICA_DAEMON_LOG_STDOUT:-1}" != "0" ]; then
+  mkdir -p "$HOME/.multica" && touch "$HOME/.multica/daemon.log"
+  tail -n 0 -F "$HOME/.multica/daemon.log" 2>/dev/null &
+fi
+
 exec multica daemon start --foreground "$@"

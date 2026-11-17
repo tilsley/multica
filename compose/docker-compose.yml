@@ -1,7 +1,7 @@
 # Local stack: STOCK Multica (server + web + Postgres, official images pinned to
 # the same tag as the upstream submodule) + our daemon (bb backend) + mock-bb.
 #
-#   cd compose && docker compose up -d --build
+#   cd compose && ./up.sh          # build, start, bootstrap, create the bb agent
 #   ./drills/run-all.sh
 #
 # This is a test harness: it enables the dev verification code so bootstrap.sh
@@ -76,25 +76,6 @@ services:
       bbnet:
         aliases: [bb]
 
-  # One-shot: creates the admin user, workspace and the daemon's PAT.
-  bootstrap:
-    image: multica-daemon-bb:local   # built by the daemon service
-    pull_policy: never
-    depends_on:
-      backend:
-        condition: service_healthy
-    entrypoint: ["/bin/sh", "/bootstrap.sh"]
-    environment:
-      MULTICA_SERVER_URL: http://backend:8080
-      BOOTSTRAP_EMAIL: ${BOOTSTRAP_EMAIL:-bb-admin@example.com}
-      MULTICA_DEV_VERIFICATION_CODE: ${MULTICA_DEV_VERIFICATION_CODE:-888888}
-    volumes:
-      - ./bootstrap.sh:/bootstrap.sh:ro
-      - state:/state
-    user: root
-    networks: [core]
-    restart: "no"
-
   daemon:
     image: multica-daemon-bb:local
     build:
@@ -117,14 +98,14 @@ services:
       MULTICA_DAEMON_DEVICE_NAME: bb-daemon (compose)
       MULTICA_AGENT_RUNTIME_NAME: bb
     volumes:
-      - state:/state:ro
+      # bootstrap.sh (run on the host) writes the daemon's PAT here.
+      - ./.state:/state:ro
       - daemon_home:/home/multica
     stop_grace_period: 40s
     networks: [core, bbnet]
 
 volumes:
   pgdata:
-  state:
   daemon_home:
 
 networks:

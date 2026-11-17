@@ -1,0 +1,48 @@
+# The bb daemon next to the official chart (release "multica" in namespace
+# bb-test => backend Service "multica-backend"). Phase 3: test namespace only.
+#
+# Secret (create out of band; never commit values):
+#   kubectl -n bb-test create secret generic multica-bb-daemon \
+#     --from-literal=MULTICA_PAT=mul_... --from-literal=MULTICA_BB_TOKEN=...
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multica-bb-daemon
+  labels: { app.kubernetes.io/name: multica-bb-daemon }
+spec:
+  # One replica: each daemon registers its own runtime (MULTICA_DAEMON_ID), and
+  # bb's idempotency + retryOf make restarts/reschedules safe, not concurrency.
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/name: multica-bb-daemon }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: multica-bb-daemon }
+    spec:
+      # SIGTERM leaves bb runs alive for the retry to reattach; give the
+      # daemon its 30s drain window plus margin.
+      terminationGracePeriodSeconds: 45
+      securityContext: { runAsNonRoot: true, runAsUser: 1000, fsGroup: 1000 }
+      containers:
+        - name: daemon
+          image: ghcr.io/OWNER/multica-daemon-bb:v0.10.0-bb   # set OWNER
+          env:
+            - { name: MULTICA_SERVER_URL, value: http://multica-backend:8080 }
+            - { name: MULTICA_BB_ENDPOINT, value: https://bb-staging.example.workers.dev }
+            - { name: MULTICA_DAEMON_ID, value: bb-daemon-k8s }
+            - { name: MULTICA_DAEMON_DEVICE_NAME, value: bb-daemon (k8s) }
+            - { name: MULTICA_AGENT_RUNTIME_NAME, value: bb }
+            - { name: MULTICA_BB_SILENCE_TIMEOUT, value: 10m }
+          envFrom:
+            - secretRef: { name: multica-bb-daemon }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }
+          volumeMounts:
+            - { name: home, mountPath: /home/multica }
+      volumes:
+        # Scratch only: bb sessions live in bb's Durable Objects, and the patch
+        # keeps resume working when the prior workdir is gone.
+        - name: home
+          emptyDir: {}
