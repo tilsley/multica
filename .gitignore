@@ -1,0 +1,4 @@
+compose/.env
+compose/.state/
+*.log
+/upstream/server/bin/

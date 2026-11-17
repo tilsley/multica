@@ -1,0 +1,133 @@
+# Local stack: STOCK Multica (server + web + Postgres, official images pinned to
+# the same tag as the upstream submodule) + our daemon (bb backend) + mock-bb.
+#
+#   cd compose && docker compose up -d --build
+#   ./drills/run-all.sh
+#
+# This is a test harness: it enables the dev verification code so bootstrap.sh
+# can create a user/workspace/PAT without email. Do not expose it.
+
+name: multica-bb
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: multica
+      POSTGRES_USER: multica
+      POSTGRES_PASSWORD: multica
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U multica -d multica"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks: [core]
+
+  backend:
+    image: ghcr.io/multica-ai/multica-backend:${MULTICA_IMAGE_TAG:-v0.10.0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
+    environment:
+      DATABASE_URL: postgres://multica:multica@postgres:5432/multica?sslmode=disable
+      PORT: "8080"
+      JWT_SECRET: ${JWT_SECRET:-change-me-change-me-change-me-change-me}
+      FRONTEND_ORIGIN: http://localhost:${FRONTEND_PORT:-3000}
+      MULTICA_APP_URL: http://localhost:${FRONTEND_PORT:-3000}
+      APP_ENV: ${APP_ENV:-development}
+      MULTICA_DEV_VERIFICATION_CODE: ${MULTICA_DEV_VERIFICATION_CODE:-888888}
+      ALLOW_SIGNUP: "true"
+      DO_NOT_TRACK: "1"
+      # Drills restart the daemon; keep the reconnect grace short so
+      # runtime_offline / runtime_recovery happen within a drill's timeout.
+      MULTICA_RUNTIME_RECONNECT_GRACE: ${MULTICA_RUNTIME_RECONNECT_GRACE:-}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    networks: [core]
+
+  frontend:
+    image: ghcr.io/multica-ai/multica-web:${MULTICA_IMAGE_TAG:-v0.10.0}
+    depends_on: [backend]
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+    environment:
+      HOSTNAME: "0.0.0.0"
+      REMOTE_API_URL: http://backend:8080
+    networks: [core]
+    profiles: [ui]
+
+  mock-bb:
+    build: ../mock-bb
+    environment:
+      MOCK_BB_TOKEN: ${MULTICA_BB_TOKEN:-local-bb-token}
+      MOCK_BB_STEP_DELAY: ${MOCK_BB_STEP_DELAY:-1s}
+      MOCK_BB_RESULT_AFTER: ${MOCK_BB_RESULT_AFTER:-8}
+      MOCK_BB_HEARTBEAT_EVERY: ${MOCK_BB_HEARTBEAT_EVERY:-2s}
+    ports:
+      - "127.0.0.1:${MOCK_BB_PORT:-8787}:8787"
+    networks:
+      bbnet:
+        aliases: [bb]
+
+  # One-shot: creates the admin user, workspace and the daemon's PAT.
+  bootstrap:
+    image: multica-daemon-bb:local   # built by the daemon service
+    pull_policy: never
+    depends_on:
+      backend:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/bootstrap.sh"]
+    environment:
+      MULTICA_SERVER_URL: http://backend:8080
+      BOOTSTRAP_EMAIL: ${BOOTSTRAP_EMAIL:-bb-admin@example.com}
+      MULTICA_DEV_VERIFICATION_CODE: ${MULTICA_DEV_VERIFICATION_CODE:-888888}
+    volumes:
+      - ./bootstrap.sh:/bootstrap.sh:ro
+      - state:/state
+    user: root
+    networks: [core]
+    restart: "no"
+
+  daemon:
+    image: multica-daemon-bb:local
+    build:
+      context: ..
+      dockerfile: Dockerfile.daemon
+      args:
+        VERSION: ${MULTICA_IMAGE_TAG:-v0.10.0}-bb
+    depends_on:
+      backend:
+        condition: service_healthy
+      mock-bb:
+        condition: service_healthy
+    environment:
+      MULTICA_SERVER_URL: http://backend:8080
+      MULTICA_PAT_FILE: /state/pat
+      MULTICA_BB_ENDPOINT: ${MULTICA_BB_ENDPOINT:-http://bb:8787}
+      MULTICA_BB_TOKEN: ${MULTICA_BB_TOKEN:-local-bb-token}
+      MULTICA_BB_SILENCE_TIMEOUT: ${MULTICA_BB_SILENCE_TIMEOUT:-2m}
+      MULTICA_DAEMON_ID: bb-daemon-compose
+      MULTICA_DAEMON_DEVICE_NAME: bb-daemon (compose)
+      MULTICA_AGENT_RUNTIME_NAME: bb
+    volumes:
+      - state:/state:ro
+      - daemon_home:/home/multica
+    stop_grace_period: 40s
+    networks: [core, bbnet]
+
+volumes:
+  pgdata:
+  state:
+  daemon_home:
+
+networks:
+  core:
+  # daemon <-> bb traffic only, so a drill can cut exactly that link.
+  bbnet:

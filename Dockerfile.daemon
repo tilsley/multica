@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1.7
+#
+# Multica daemon with the bb backend. Builds ONLY `multica` (CLI + daemon) from
+# the pinned upstream submodule plus our overlay; server/web stay stock images.
+#
+#   docker build -f Dockerfile.daemon -t multica-daemon-bb .
+#
+# Behind a TLS-intercepting proxy, pass its CA as a build secret:
+#   docker build --secret id=extra_ca,src=/path/to/ca.crt -f Dockerfile.daemon .
+
+ARG GO_IMAGE=golang:1.26.9-bookworm
+ARG RUNTIME_IMAGE=alpine:3.21
+
+FROM ${GO_IMAGE} AS build
+WORKDIR /src
+
+# Dependencies first for layer caching.
+COPY upstream/server/go.mod upstream/server/go.sum upstream/server/
+RUN --mount=type=secret,id=extra_ca,required=false \
+    --mount=type=cache,target=/go/pkg/mod \
+    if [ -s /run/secrets/extra_ca ]; then cat /run/secrets/extra_ca >> /etc/ssl/certs/ca-certificates.crt; fi \
+ && cd upstream/server && go mod download
+
+COPY upstream/ upstream/
+COPY bb-backend/ bb-backend/
+COPY patches/ patches/
+COPY scripts/apply-overlay.sh scripts/
+RUN scripts/apply-overlay.sh upstream
+
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG DATE=unknown
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    cd upstream/server && CGO_ENABLED=0 go build -trimpath \
+      -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
+      -o /out/multica ./cmd/multica
+
+FROM ${RUNTIME_IMAGE}
+# Deliberately no apk installs: the bb runtime needs neither git (only used for
+# local_directory worktrees / repo GC) nor a shell toolchain. The base image
+# already ships the CA bundle.
+RUN adduser -D -h /home/multica multica
+COPY --from=build /out/multica /usr/local/bin/multica
+COPY docker/daemon-entrypoint.sh /usr/local/bin/daemon-entrypoint.sh
+USER multica
+WORKDIR /home/multica
+ENV MULTICA_DAEMON_AUTO_UPDATE=false \
+    MULTICA_DAEMON_AUTO_RELOAD=0 \
+    MULTICA_WORKSPACES_ROOT=/home/multica/multica_workspaces
+ENTRYPOINT ["/usr/local/bin/daemon-entrypoint.sh"]

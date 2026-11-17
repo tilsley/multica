@@ -1,0 +1,82 @@
+diff --git a/server/internal/daemon/agents_probe.go b/server/internal/daemon/agents_probe.go
+index 0ec940a3c..b24a2e249 100644
+--- a/server/internal/daemon/agents_probe.go
++++ b/server/internal/daemon/agents_probe.go
+@@ -359,6 +359,9 @@ var probeAgentCLIs = func() map[string]AgentEntry {
+ 			Model:   strings.TrimSpace(os.Getenv("MULTICA_MUSEAPP_MODEL")),
+ 		}
+ 	}
++	if e, ok := bbAgentEntry(); ok {
++		agents["bb"] = e
++	}
+ 	if e, ok := probe("MULTICA_ZCODE_PATH", "zcode", "MULTICA_ZCODE_MODEL"); ok {
+ 		agents["zcode"] = e
+ 	} else if strings.TrimSpace(os.Getenv("MULTICA_ZCODE_PATH")) == "" {
+diff --git a/server/internal/daemon/daemon.go b/server/internal/daemon/daemon.go
+index 6e7bffa76..6bd05554d 100644
+--- a/server/internal/daemon/daemon.go
++++ b/server/internal/daemon/daemon.go
+@@ -195,6 +195,9 @@ func taskMulticaEnvironment(task Task, provider, agentName, token, configRoot, w
+ 		"TMP":                  tempDir,
+ 		"TEMP":                 tempDir,
+ 	}
++	if provider == "bb" {
++		bbTaskEnvironment(env, task)
++	}
+ 	if task.QuickCreatePrompt != "" {
+ 		assigneeType, assigneeID := "agent", task.AgentID
+ 		if task.SquadID != "" {
+@@ -2564,6 +2567,9 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
+ 	if name == "museapp" {
+ 		return d.probeMuseAppReceptionist(ctx)
+ 	}
++	if name == "bb" {
++		return d.probeBB(ctx)
++	}
+ 	var (
+ 		lastErr  error
+ 		attempts int
+@@ -6890,7 +6896,7 @@ func providerDisplayName(name string) string {
+ // 2.13.0 ACP smoke — see the call site. Still unprobed: grok, qoder, codebuddy.
+ func providerNeedsInlineSystemPrompt(provider string) bool {
+ 	switch provider {
+-	case "openclaw", "kimi", "traecli", "qwenpaw":
++	case "openclaw", "kimi", "traecli", "qwenpaw", "bb":
+ 		return true
+ 	default:
+ 		return false
+@@ -7039,6 +7045,8 @@ func gateResumeToReachableSession(task *Task, taskCtx *execenv.TaskContextForEnv
+ 		reachable = sessionHomeReachable
+ 	} else if provider == "claude" && claudeResumeReady {
+ 		reachable = sessionHomeReachable
++	} else if provider == "bb" {
++		reachable = true
+ 	} else {
+ 		// Compare the directories, not the spelling. Reuse runs in the canonical
+ 		// path it validated and locked, which need not be character-identical to
+diff --git a/server/internal/daemon/types.go b/server/internal/daemon/types.go
+index 65c66b224..e95b985c9 100644
+--- a/server/internal/daemon/types.go
++++ b/server/internal/daemon/types.go
+@@ -80,6 +80,8 @@ type Task struct {
+ 	StartClaimSupported  bool                   `json:"start_claim_supported,omitempty"`
+ 	DispatchedAt         string                 `json:"dispatched_at,omitempty"`
+ 	ID                   string                 `json:"id"`
++	ParentTaskID         string                 `json:"parent_task_id,omitempty"` // auto-retry lineage (bb idempotency)
++	Attempt              int32                  `json:"attempt,omitempty"`
+ 	AgentID              string                 `json:"agent_id"`
+ 	RuntimeID            string                 `json:"runtime_id"`
+ 	IssueID              string                 `json:"issue_id"`
+diff --git a/server/pkg/agent/agent.go b/server/pkg/agent/agent.go
+index e1a42c48f..eefcf0a7d 100644
+--- a/server/pkg/agent/agent.go
++++ b/server/pkg/agent/agent.go
+@@ -560,6 +560,8 @@ func New(agentType string, cfg Config) (Backend, error) {
+ 		return &museappBackend{cfg: cfg}, nil
+ 	case "zcode":
+ 		return &zcodeBackend{cfg: cfg}, nil
++	case "bb":
++		return &bbBackend{cfg: cfg}, nil
+ 	default:
+ 		return nil, fmt.Errorf("unknown agent type: %q (supported: %s)", agentType, strings.Join(SupportedTypes, ", "))
+ 	}

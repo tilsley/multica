@@ -1,0 +1,10 @@
+**/node_modules
+upstream/.git
+upstream/apps
+upstream/packages
+upstream/e2e
+upstream/docs
+upstream/server/bin
+.git
+compose/.state
+**/*.log
