@@ -30,16 +30,24 @@ wait_bb_running() { # issue timeout
   fail "$1: bb never started a run"
 }
 
-# Wait until every Multica run for the issue is terminal.
-wait_settled() { # issue timeout
+# Wait until the issue is quiet: every Multica run terminal AND no bb run for it
+# still running, seen on two polls 3s apart. One poll is not enough: when the
+# server fails an attempt (runtime_recovery) it can insert the retry a moment
+# later, and a poll in that gap sees "all terminal" while work is still live.
+settled_once() { # issue
+  runs_json "$1" | jq -e 'length > 0 and all(.[]; .status|IN("completed","failed","cancelled"))' >/dev/null \
+    && mock_state | jq -e --arg i "$1" 'all(.tasks[] | select(.issue==$i); .status != "running")' >/dev/null
+}
+wait_settled() { # issue timeout-in-polls
   for _ in $(seq "${2:-180}"); do
-    if runs_json "$1" | jq -e 'length > 0 and all(.[]; .status|IN("completed","failed","cancelled"))' >/dev/null; then
-      return 0
+    if settled_once "$1"; then
+      sleep 3
+      settled_once "$1" && return 0
     fi
     sleep 2
   done
   runs_json "$1" | jq -c '.[] | {id, status, attempt, parent_task_id, failure_reason}' >&2
-  fail "$1: runs did not settle within $((${2:-180} * 2))s"
+  fail "$1: runs did not settle"
 }
 
 # The drill invariants, checked per retry lineage (a root task plus its
