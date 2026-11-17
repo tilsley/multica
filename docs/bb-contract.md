@@ -96,3 +96,50 @@ SSE comment lines (`: keepalive`) are allowed for proxies, but they don't count 
 | Daemon receives SIGTERM or SIGINT (deploy, restart) | **No cancel.** The run keeps going and the retry reattaches. |
 | Daemon crashes (SIGKILL, OOM) | Nothing, obviously. The retry reattaches. |
 | bb silent past the silence timeout | **No cancel.** Attempt fails as `timeout` and the retry reattaches. |
+
+## Implementing this on bb (OpenCode service in k8s)
+
+bb hosts OpenCode with `@opencode/sdk`, which runs the OpenCode server in-process. The same SDK has a Cloudflare profile (`@opencode/sdk/workerd`, [docs](https://opencode.ai/docs/build/sdk/cloudflare)) that keeps "durable events" in Durable Object storage. Those durable events are for **host eviction recovery only**. OpenCode's client-facing stream (`opencode.events.subscribe()`) is **live-only: no replay, no automatic reconnection**, and a late subscriber gets only a `server.connected` marker.
+
+So the resumable `since=N` stream has to be built by bb, on its Postgres mailbox. That's the only layer that can give the daemon gap-free, replayable events across reconnects and pod restarts.
+
+```sql
+-- One row per Multica task id that has ever been PUT (or cancelled first).
+create table bb_task (
+  task_id     text primary key,          -- Multica task id or "<id>:turn<n>"
+  run_id      text not null,             -- canonical run; = task_id unless aliased
+  status      text not null,             -- running | succeeded | failed | cancelled
+  session_id  text,                      -- OpenCode sessionID (resumeSessionId)
+  request     jsonb,
+  created_at  timestamptz not null default now()
+);
+create table bb_event (
+  run_id  text   not null,
+  seq     bigint not null,               -- 1, 2, 3 … per run (the SSE id)
+  kind    text   not null,
+  body    jsonb  not null,               -- large payloads: S3 key, not inline
+  primary key (run_id, seq)
+);
+```
+
+**PUT, in one transaction:**
+1. `select … for update` the `task_id`. If the row exists, return it (`created: false`). A tombstone (cancelled, no run) returns 409.
+2. If `retryOf` is set, resolve `retryOf → run_id` through `bb_task` and insert `(task_id, run_id = parent's run_id)` as an alias.
+3. Otherwise insert `(task_id, run_id = task_id, status = running)` and enqueue the run on the mailbox.
+
+Commit, then answer 200.
+
+**Run worker:**
+1. Claim the mailbox row.
+2. Call `opencode.sessions.create()` (or reuse `resumeSessionId`), then `sessions.prompt()`.
+3. Consume `events.subscribe()`. Map each OpenCode event to a contract event and `insert into bb_event (run_id, seq, …)`, with `seq` as `max+1` under the run's lock, or a per-run counter column.
+4. Emit a `heartbeat` row every ~15–30s while the session is busy, especially during long tool calls.
+5. On completion, write the `result` row and set `bb_task.status`.
+
+If a pod dies mid-run, the mailbox lease expires and another worker resumes the OpenCode session, continuing `seq` from the last row.
+
+**Events endpoint:** `select … where run_id = $1 and seq > $since order by seq`, then wait on `LISTEN bb_event_<run>` (or poll) for new rows. Close after the `result` row.
+
+**Cancel:** abort the active prompt (the SDK's AbortSignal or session abort), write the `cancelled` result row, and mark the task row. For an unknown id, insert a tombstone row.
+
+**Callbacks to Multica:** the agent calls Multica with `multica.taskToken` (`MULTICA_TOKEN`) and `multica.serverUrl`. With both services in the same cluster, that's the backend Service URL. No public exposure is needed, but the daemon sends the URL it uses itself, so give the daemon an in-cluster `MULTICA_SERVER_URL` that bb can also reach.
