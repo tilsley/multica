@@ -38,4 +38,13 @@ describe("OpenCode in a sandbox", () => {
     const { root } = await run(sandboxes.open({ key, repos: [{ url: origin }] }))
     expect(new TextDecoder().decode(await run(sandboxes.readFile(key, `${root}/${repo}/hello.txt`)))).toBe("hello\n")
   })
+
+  it("runs the shell tool through the sandbox itself (bb's plugin): a failing command reports its exit code", async () => {
+    const host = await hostP
+    const runtime = makeOpenCodeRuntime({ host: async () => host.host, model: host.ref, directory: host.dir, heartbeatEveryMs: 50, sandboxes })
+    const task = { ...request("s-fail", "Check something\nrun: echo oops >&2; exit 3"), repos: [] }
+    const { events } = await drive(runtime, "s-fail", await run(runtime.start({ runId: "s-fail", sessionId: defaultSessionId("s-fail"), request: task })))
+    const result = events.at(-1)
+    expect(result?.kind === "result" && result.summary).toContain("oops\n\n[exit code 3]")
+  })
 })

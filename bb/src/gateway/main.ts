@@ -16,6 +16,7 @@ import type { Sandboxes } from "../ports/index.ts"
 //   BB_SANDBOX_NAMESPACE   default: the pod's namespace
 //   BB_SANDBOX_WARM_POOL   default bb-sandbox
 //   BB_SANDBOX_READY_TIMEOUT_MS  default 180000
+//   BB_GATEWAY_LOG         1 to log every request (method, path, status, time)
 
 const env = process.env
 const serviceAccount = "/var/run/secrets/kubernetes.io/serviceaccount"
@@ -52,5 +53,13 @@ const sandboxes = backend === "agent-sandbox" ? agentSandbox() : backend === "lo
 if (!sandboxes) throw new Error(`unknown BB_SANDBOX_BACKEND "${backend}" (agent-sandbox | local)`)
 
 const port = Number(env.BB_GATEWAY_PORT || 8090)
-Bun.serve({ hostname: "0.0.0.0", port, fetch: makeGatewayHandler(sandboxes, token) })
+const handler = makeGatewayHandler(sandboxes, token)
+const logged = async (request: Request) => {
+  const started = performance.now()
+  const response = await handler(request)
+  const { pathname } = new URL(request.url)
+  Effect.runFork(Effect.log("request", { method: request.method, path: pathname, status: response.status, ms: Math.round(performance.now() - started) }))
+  return response
+}
+Bun.serve({ hostname: "0.0.0.0", port, fetch: env.BB_GATEWAY_LOG === "1" ? logged : handler })
 Effect.runFork(Effect.log("bb gateway listening", { port, backend, base }))

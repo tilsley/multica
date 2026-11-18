@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { OpenCode } from "@opencode/sdk/effect"
 import { Effect, Exit, Result, Scope } from "effect"
 import { type ModelSetup, modelSetup } from "../src/adapters/model/index.ts"
-import { providerName, sandboxWorkspaceProvider } from "../src/adapters/opencode/workspace.ts"
+import { sandboxHostOptions } from "../src/adapters/opencode/workspace.ts"
 import type { Sandboxes } from "../src/ports/index.ts"
 
 export const scriptedSetup = (): ModelSetup =>
@@ -34,7 +34,7 @@ export const makeOpenCodeHost = async (setup: ModelSetup = scriptedSetup(), sand
         config: { directory: dir },
         models: { fetch: false },
         events: { persist: true },
-        ...(sandboxes ? { workspaceProviders: { [providerName]: sandboxWorkspaceProvider(sandboxes) } } : {})
+        ...(sandboxes ? sandboxHostOptions(sandboxes) : {})
       }),
       scope
     )

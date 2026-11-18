@@ -12,7 +12,7 @@ import type { DurableObjectNamespace, DurableObjectState } from "../adapters/dur
 import { defaultScript, makeScriptedRuntime } from "../adapters/fake/runtime.ts"
 import { makeGatewaySandboxes } from "../adapters/gateway/client.ts"
 import { makeOpenCodeRuntime } from "../adapters/opencode/runtime.ts"
-import { providerName, sandboxWorkspaceProvider } from "../adapters/opencode/workspace.ts"
+import { sandboxHostOptions } from "../adapters/opencode/workspace.ts"
 import { makePostgresMailbox } from "../adapters/postgres/mailbox.ts"
 import { modelSetup } from "../adapters/model/index.ts"
 import { OpenCodeWorkerd } from "@opencode/sdk/workerd/effect"
@@ -50,6 +50,8 @@ export interface Env {
   /** Default http://127.0.0.1:8090 (the sidecar in the same pod). */
   readonly BB_GATEWAY_URL?: string
   readonly BB_GATEWAY_TOKEN?: string
+  /** OpenCode's own log level ("debug", "info", "warn"…), forwarded to bb's log. Default: off. */
+  readonly BB_OPENCODE_LOG?: string
   /** The Postgres mailbox. Without it, the control cell keeps the index (celld dev). */
   readonly DATABASE_URL?: string
 }
@@ -69,6 +71,19 @@ type CellState = DurableObjectState & { readonly id: { readonly name?: string } 
 type SessionState = {
   readonly storage: Parameters<typeof OpenCodeWorkerd.create>[0]["storage"]
   blockConcurrencyWhile<T>(fn: () => Promise<T>): Promise<T>
+}
+
+const logLevels = ["trace", "debug", "info", "warn", "error", "fatal"] as const
+const openCodeLog = (level: string | undefined) => {
+  const chosen = logLevels.find((l) => l === level)
+  if (!chosen) return undefined
+  return {
+    log: {
+      level: chosen,
+      emit: (entry: { readonly level: string; readonly message: string; readonly attributes?: Readonly<Record<string, unknown>>; readonly cause?: unknown }) =>
+        Effect.runFork(Effect.log(`opencode: ${entry.message}`, { level: entry.level, ...entry.attributes, ...(entry.cause === undefined ? {} : { cause: entry.cause instanceof Error ? entry.cause.message : JSON.stringify(entry.cause) }) }))
+    }
+  }
 }
 
 export class TaskCell extends DurableObject<Env> implements TaskCellRpc {
@@ -170,7 +185,9 @@ export class SessionCell extends DurableObject<Env> implements SessionCellRpc {
                 storage: state.storage,
                 config: { providers: model.providers, model: model.model },
                 fetch: model.fetch,
-                ...(sandboxes ? { workspaceProviders: { [providerName]: sandboxWorkspaceProvider(sandboxes) } } : {})
+                ...openCodeLog(env.BB_OPENCODE_LOG),
+                models: { fetch: false },
+                ...(sandboxes ? sandboxHostOptions(sandboxes) : {})
               }),
               scope
             )
