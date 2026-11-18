@@ -16,9 +16,6 @@ ADD --checksum=sha256:ce0ee3552cc8d55dde3998dc3b1b0c8f547bbcb4bc803d2a94842368b0
 FROM scratch AS celld-arm64
 ADD --checksum=sha256:4eca87c6797590000a344c1b768364e9696e8817f5fbc16193f459d2edac7cd0 \
     https://github.com/denoland/celld/releases/download/v0.6.2/celld-aarch64-unknown-linux-gnu.gz /celld.gz
-ARG TARGETARCH
-FROM celld-${TARGETARCH:-amd64} AS celld
-
 # --- bundle the Worker once, so nodes need no esbuild -------------------------
 FROM ${BUN_IMAGE} AS bundle
 WORKDIR /src
@@ -34,8 +31,12 @@ RUN ./node_modules/.bin/esbuild src/worker/index.ts --bundle --format=esm --plat
 
 # --- runtime ----------------------------------------------------------------
 FROM ${RUNTIME_IMAGE}
-COPY --from=celld /celld.gz /tmp/celld.gz
-RUN gzip -dc /tmp/celld.gz > /usr/local/bin/celld && chmod 755 /usr/local/bin/celld && rm /tmp/celld.gz \
+# Both pinned binaries come in; the target architecture's is kept. (A stage named
+# by ${TARGETARCH} would be neater, but skaffold's Dockerfile parser rejects it.)
+COPY --from=celld-amd64 /celld.gz /tmp/celld-amd64.gz
+COPY --from=celld-arm64 /celld.gz /tmp/celld-arm64.gz
+ARG TARGETARCH
+RUN gzip -dc "/tmp/celld-${TARGETARCH:-amd64}.gz" > /usr/local/bin/celld && chmod 755 /usr/local/bin/celld && rm /tmp/celld-*.gz \
  && useradd --system --create-home --home-dir /var/lib/bb bb \
  && mkdir -p /app && chown bb:bb /app
 # /app is the celld project: the entrypoint writes wrangler.json beside the bundle.
