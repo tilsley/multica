@@ -3,15 +3,18 @@
 # sure a "bb" agent exists on the daemon's bb runtime. Idempotent.
 #   ./up.sh            # stock server + mock-bb + our daemon
 #   ./up.sh --ui       # also start the stock web UI on :3000
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.bb.yml ./up.sh   # real bb fleet instead of mock-bb
 set -euo pipefail
 cd "$(dirname "$0")"
 PROFILE=(); [ "${1:-}" = "--ui" ] && PROFILE=(--profile ui)
 # SKIP_BUILD=1 uses images built beforehand (e.g. `make image` with a CA secret
 # behind a TLS-intercepting proxy, tagged multica-daemon-bb:local).
 if [ "${SKIP_BUILD:-0}" != "1" ]; then
-  docker compose "${PROFILE[@]}" build daemon mock-bb
+  docker compose "${PROFILE[@]}" build
 fi
-SVC=(postgres backend mock-bb); [ ${#PROFILE[@]} -gt 0 ] && SVC+=(frontend)
+# Real bb (docker-compose.bb.yml in COMPOSE_FILE) or mock-bb.
+if docker compose config --services | grep -qx bb-0; then BB=(bb-0 bb-1); else BB=(mock-bb); fi
+SVC=(postgres backend "${BB[@]}"); [ ${#PROFILE[@]} -gt 0 ] && SVC+=(frontend)
 docker compose "${PROFILE[@]}" up -d --no-build "${SVC[@]}"
 ./bootstrap.sh
 docker compose "${PROFILE[@]}" up -d --no-build daemon

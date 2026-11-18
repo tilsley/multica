@@ -1,0 +1,46 @@
+# Our Multica daemon with the bb backend, next to the official chart (release
+# "multica" => backend Service multica-backend).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multica-bb-daemon
+  labels: { app.kubernetes.io/name: multica-bb-daemon }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app.kubernetes.io/name: multica-bb-daemon }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: multica-bb-daemon }
+    spec:
+      # SIGTERM leaves bb runs alive for the retry to reattach; give the daemon
+      # its 30s drain window plus margin.
+      terminationGracePeriodSeconds: 45
+      securityContext: { runAsNonRoot: true, runAsUser: 1000, fsGroup: 1000 }
+      containers:
+        - name: daemon
+          image: multica-daemon-bb
+          env:
+            - { name: MULTICA_SERVER_URL, value: http://multica-backend:8080 }
+            - { name: MULTICA_BB_ENDPOINT, value: http://bb:8080 }
+            - name: MULTICA_BB_TOKEN
+              valueFrom: { secretKeyRef: { name: bb-secrets, key: BB_TOKEN } }
+            - { name: MULTICA_BB_SILENCE_TIMEOUT, value: 2m }
+            - { name: MULTICA_DAEMON_ID, value: bb-daemon-k8s }
+            - { name: MULTICA_DAEMON_DEVICE_NAME, value: bb-daemon (k8s) }
+            - { name: MULTICA_AGENT_RUNTIME_NAME, value: bb }
+            - { name: MULTICA_ENSURE_AGENT, value: bb }
+            # Dev cluster: create the user/workspace/PAT with the dev code. In a real
+            # cluster set MULTICA_PAT from a Secret instead (deploy/README.md).
+            - { name: MULTICA_DEV_BOOTSTRAP_EMAIL, value: bb-admin@example.com }
+            - name: MULTICA_DEV_VERIFICATION_CODE
+              valueFrom: { secretKeyRef: { name: multica-secrets, key: MULTICA_DEV_VERIFICATION_CODE } }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }
+          volumeMounts:
+            - { name: home, mountPath: /home/multica }
+      volumes:
+        - name: home
+          emptyDir: {}

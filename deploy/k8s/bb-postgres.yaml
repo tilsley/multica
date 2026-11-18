@@ -1,0 +1,38 @@
+# bb's mailbox database (separate from Multica's).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: bb-postgres
+spec:
+  serviceName: bb-postgres
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: bb-postgres }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: bb-postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: pgvector/pgvector:pg17
+          env:
+            - { name: POSTGRES_DB, value: bb }
+            - { name: POSTGRES_USER, value: bb }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: bb-secrets, key: POSTGRES_PASSWORD } }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports: [{ containerPort: 5432, name: postgres }]
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "bb", "-d", "bb"] }
+          volumeMounts: [{ name: data, mountPath: /var/lib/postgresql/data }]
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bb-postgres
+spec:
+  selector: { app.kubernetes.io/name: bb-postgres }
+  ports: [{ name: postgres, port: 5432, targetPort: 5432 }]

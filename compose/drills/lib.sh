@@ -4,7 +4,8 @@
 set -euo pipefail
 COMPOSE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MOCK="${MOCK_BB_URL:-http://127.0.0.1:${MOCK_BB_PORT:-8787}}"
-dc() { docker compose --project-directory "$COMPOSE_DIR" -f "$COMPOSE_DIR/docker-compose.yml" "$@"; }
+# Honors COMPOSE_FILE (e.g. docker-compose.yml:docker-compose.bb.yml for real bb).
+dc() { (cd "$COMPOSE_DIR" && docker compose "$@"); }
 mc() { dc exec -T daemon multica "$@"; }
 log() { printf '\033[1;34m[%s] %s\033[0m\n' "$(date +%T)" "$*"; }
 fail() { printf '\033[1;31mFAIL: %s\033[0m\n' "$*" >&2; exit 1; }

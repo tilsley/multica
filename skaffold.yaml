@@ -1,0 +1,63 @@
+# Everything on a local kind cluster: stock Multica (official Helm chart, GHCR
+# images), our daemon (bb backend), and bb as a two-node celld fleet with MinIO
+# and Postgres.
+#
+#   kind create cluster --name bb --config deploy/kind/cluster.yaml
+#   skaffold dev            # build, deploy, stream logs, port-forward
+#   open http://localhost:3000   (sign in as bb-admin@example.com, code 888888)
+#
+# Behind a TLS-intercepting proxy, build the images yourself with the CA secret
+# (see bb/Dockerfile, Dockerfile.daemon) and run `skaffold dev --build-artifacts=...`.
+apiVersion: skaffold/v4beta13
+kind: Config
+metadata:
+  name: multica-bb
+
+build:
+  local:
+    push: false              # kind: skaffold loads images into the cluster
+    useBuildkit: true
+  artifacts:
+    - image: multica-daemon-bb
+      context: .
+      docker:
+        dockerfile: Dockerfile.daemon
+        buildArgs:
+          VERSION: v0.10.0-bb
+    - image: bb
+      context: bb
+      docker:
+        dockerfile: Dockerfile
+
+manifests:
+  rawYaml:
+    - deploy/k8s/secrets.dev.yaml
+    - deploy/k8s/minio.yaml
+    - deploy/k8s/bb-postgres.yaml
+    - deploy/k8s/bb.yaml
+    - deploy/k8s/daemon.yaml
+
+deploy:
+  kubectl: {}
+  helm:
+    releases:
+      - name: multica
+        chartPath: upstream/deploy/helm/multica   # the official chart, pinned with the submodule
+        valuesFiles:
+          - deploy/values.yaml
+          - deploy/values-dev.yaml
+        wait: false
+
+portForward:
+  - resourceType: service
+    resourceName: multica-frontend
+    port: 3000
+    localPort: 3000
+  - resourceType: service
+    resourceName: multica-backend
+    port: 8080
+    localPort: 8080
+  - resourceType: service
+    resourceName: bb
+    port: 8080
+    localPort: 8787          # same port as mock-bb, so compose/drills/lib.sh works unchanged

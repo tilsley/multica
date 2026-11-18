@@ -1,0 +1,91 @@
+# Real bb instead of mock-bb: a two-node celld fleet with MinIO as the fleet
+# bucket and Postgres as the mailbox, built from ../bb.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.bb.yml up -d
+#   MOCK_BB_URL=http://127.0.0.1:8787 ./drills/run-all.sh
+#
+# bb runs in test mode (BB_TEST_ADMIN=1) here so the drills can use the same
+# /admin endpoints and fault switches as mock-bb.
+
+x-bb-node: &bb-node
+  image: bb:local
+  build: ../bb
+  depends_on:
+    minio-init:
+      condition: service_completed_successfully
+    bb-postgres:
+      condition: service_healthy
+  environment: &bb-env
+    CELLD_BUCKET: s3://bb-fleet
+    S3_ENDPOINT: http://minio:9000
+    AWS_ACCESS_KEY_ID: bb-minio
+    AWS_SECRET_ACCESS_KEY: bb-minio-secret
+    AWS_REGION: us-east-1
+    BB_TOKEN: ${MULTICA_BB_TOKEN:-local-bb-token}
+    BB_TEST_ADMIN: "1"
+    BB_TICK_MS: "500"
+    DATABASE_URL: postgres://bb:bb@bb-postgres:5432/bb
+  stop_grace_period: 45s   # above celld's 40s handoff bound
+  restart: unless-stopped
+
+services:
+  mock-bb:
+    profiles: [mock]
+
+  minio:
+    # MinIO >= RELEASE.2025-09-07 (celld#162). Fine for local; not qualified for production.
+    image: chainguard/minio:latest
+    command: ["server", "/data", "--address", ":9000"]
+    environment:
+      MINIO_ROOT_USER: bb-minio
+      MINIO_ROOT_PASSWORD: bb-minio-secret
+    networks: [bbinternal]
+
+  minio-init:
+    image: chainguard/minio:latest
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - until mc alias set local http://minio:9000 bb-minio bb-minio-secret >/dev/null 2>&1; do sleep 1; done; mc mb -p local/bb-fleet
+    depends_on: [minio]
+    networks: [bbinternal]
+    restart: "no"
+
+  bb-postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: bb
+      POSTGRES_USER: bb
+      POSTGRES_PASSWORD: bb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bb -d bb"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks: [bbinternal]
+
+  bb-0:
+    <<: *bb-node
+    environment:
+      <<: *bb-env
+      BB_DEPLOY: "1"
+      BB_ADVERTISE: bb-0:8081
+    ports:
+      - "127.0.0.1:${MOCK_BB_PORT:-8787}:8080"
+    networks:
+      bbnet:
+        aliases: [bb]
+      bbinternal: {}
+
+  bb-1:
+    <<: *bb-node
+    environment:
+      <<: *bb-env
+      BB_ADVERTISE: bb-1:8081
+    networks: [bbnet, bbinternal]
+
+  daemon:
+    environment:
+      MULTICA_BB_ENDPOINT: http://bb:8080
+
+networks:
+  bbinternal:

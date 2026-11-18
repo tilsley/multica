@@ -23,7 +23,8 @@ This repo runs self-hosted [Multica](https://github.com/multica-ai/multica) as t
 | `Dockerfile.daemon` | Builds `multica` (CLI + daemon) from upstream + overlay. |
 | `compose/` | Stock Multica + our daemon + mock-bb, a bootstrap script and failure drills. |
 | `hooks/claude-session-end.sh` | Claude Code `SessionEnd` hook that logs local sessions as done issues. |
-| `deploy/` | Phase 3 starter: values for the official chart plus the daemon Deployment. |
+| `bb/` | **bb itself**: OpenCode in celld Durable Objects (one cell per task), Postgres mailbox, S3 fleet bucket. Effect v4, ports and adapters. See `bb/AGENTS.md` and `bb/docs/domain.md`. |
+| `skaffold.yaml`, `deploy/` | The whole system on kind: the official Multica chart, our daemon, and a two-node bb celld fleet with MinIO and Postgres. See `deploy/README.md`. |
 | `docs/bb-contract.md` | The HTTP contract real bb must implement. |
 
 ## Quick start
@@ -179,8 +180,25 @@ Optional settings:
 - **image:** builds `Dockerfile.daemon` and pushes `ghcr.io/<owner>/multica-daemon-bb:<upstream-tag>-bb-<sha>`, plus `:<upstream-tag>-bb` and `:latest` from `main`. Pull requests build only.
 - **drills:** `compose/up.sh` plus every drill on stock GHCR images.
 
+## bb
+
+`bb/` is an OpenCode service on [celld](https://celld.dev): self-hosted Cloudflare Workers and Durable Objects backed by an S3 bucket.
+
+**One Durable Object (cell) per task.** celld guarantees that exactly one node serves a cell at a time and that an acknowledged write is never lost. The cell's SQLite holds the task and its event log, the cell's alarm drives the run, and the cell serves the SSE stream. That gives `idFromName(taskId)` idempotency, `retryOf` aliasing, resumable `since=N` and cancel tombstones with no coordination outside the cell.
+
+**Postgres is the mailbox:** an index of every task across cells. Each cell writes to it after each commit, connecting per operation because workerd sockets are event-bound.
+
+**Status.** The agent runtime is a scripted fake for now. OpenCode (`@opencode/sdk/workerd`, already shown to boot inside a celld cell), Claude, and the agent-sandbox `Workspace` and `Sandbox` ports are next.
+
+| Command (in `bb/`) | What |
+| --- | --- |
+| `bun run verify` | Typecheck with Effect diagnostics, oxlint layer rules, knip, tests |
+| `DATABASE_URL=… bun run test:postgres` | Postgres mailbox contract |
+| `celld dev . --port 18787` | bb locally (test mode); the Go contract test runs against it |
+| `COMPOSE_FILE=docker-compose.yml:docker-compose.bb.yml compose/up.sh` | The Multica stack with the real bb fleet; `compose/drills/run-all.sh` then runs all six drills (06 kills celld nodes) |
+
 ## Phases
 
 1. **Done:** the scaffold above.
 2. **Next:** compose against a real bb staging Worker. Set `MULTICA_BB_ENDPOINT` and `MULTICA_BB_TOKEN` in `compose/.env` and run the drills (the mock-specific admin checks need equivalents on bb).
-3. **Later:** k8s with the official chart plus `deploy/daemon.yaml` in a test namespace, then a router in front of bb so Slack and GitHub `@bb` triggers create the Multica issue first.
+3. **In progress:** bb itself (`bb/`), and `skaffold dev` on kind for everything. Then OpenCode, Claude, agent-sandbox, and a router in front of bb so Slack and GitHub `@bb` triggers create the Multica issue first.

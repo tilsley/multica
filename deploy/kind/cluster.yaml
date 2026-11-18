@@ -1,0 +1,12 @@
+# Local cluster for `skaffold dev`: kind create cluster --name bb --config deploy/kind/cluster.yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+kubeadmConfigPatches:
+  # Kubernetes 1.35+ refuses cgroup v1 hosts by default. Docker Desktop and
+  # modern Linux use cgroup v2 and ignore this; it lets kind run on older hosts
+  # (and in CI sandboxes) that still use v1.
+  - |
+    kind: KubeletConfiguration
+    failCgroupV1: false
+nodes:
+  - role: control-plane

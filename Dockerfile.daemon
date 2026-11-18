@@ -11,6 +11,16 @@
 ARG GO_IMAGE=golang:1.26.9-bookworm
 ARG RUNTIME_IMAGE=alpine:3.21
 
+# jq for the entrypoint's optional dev bootstrap and agent setup, pinned per arch.
+FROM scratch AS jq-amd64
+ADD --checksum=sha256:020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d \
+    https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64 /jq
+FROM scratch AS jq-arm64
+ADD --checksum=sha256:6bc62f25981328edd3cfcfe6fe51b073f2d7e7710d7ef7fcdac28d4e384fc3d4 \
+    https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-arm64 /jq
+ARG TARGETARCH
+FROM jq-${TARGETARCH:-amd64} AS jq
+
 FROM ${GO_IMAGE} AS build
 WORKDIR /src
 
@@ -42,6 +52,7 @@ FROM ${RUNTIME_IMAGE}
 # already ships the CA bundle.
 RUN adduser -D -h /home/multica multica
 COPY --from=build /out/multica /usr/local/bin/multica
+COPY --from=jq --chmod=755 /jq /usr/local/bin/jq
 COPY docker/daemon-entrypoint.sh /usr/local/bin/daemon-entrypoint.sh
 USER multica
 WORKDIR /home/multica

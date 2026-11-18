@@ -1,0 +1,65 @@
+# bb: a celld fleet. Every pod is a node serving the same deployment from the
+# fleet bucket; bb-0 publishes it (bb/docker/entrypoint.sh). Two nodes give
+# celld's fleet durability (a follower fsync acknowledges writes).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: bb
+spec:
+  serviceName: bb-peers
+  replicas: 2
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels: { app.kubernetes.io/name: bb }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: bb }
+    spec:
+      # celld hands its cells to a peer on SIGTERM within CELLD_SHUTDOWN_TOTAL_MS (40s).
+      terminationGracePeriodSeconds: 50
+      containers:
+        - name: celld
+          image: bb
+          env:
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            - { name: BB_ADVERTISE, value: "$(POD_NAME).bb-peers.$(POD_NAMESPACE).svc.cluster.local:8081" }
+            - { name: CELLD_BUCKET, value: s3://bb-fleet }
+            - { name: S3_ENDPOINT, value: http://minio:9000 }
+            - { name: AWS_REGION, value: us-east-1 }
+            - { name: BB_TEST_ADMIN, value: "1" }   # dev cluster: drills + mock-bb /admin API. Remove in production.
+            - { name: BB_TICK_MS, value: "500" }
+          envFrom:
+            - secretRef: { name: bb-secrets }
+          ports:
+            - { containerPort: 8080, name: http }
+            - { containerPort: 8081, name: peer }
+          readinessProbe:
+            httpGet: { path: /.well-known/celld/health, port: 8080 }
+            periodSeconds: 3
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 1Gi }
+---
+# Peer addresses for --advertise. The internal listener is unauthenticated:
+# never expose it outside the cluster.
+apiVersion: v1
+kind: Service
+metadata:
+  name: bb-peers
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector: { app.kubernetes.io/name: bb }
+  ports: [{ name: peer, port: 8081, targetPort: 8081 }]
+---
+# The bb contract. Any node serves any cell.
+apiVersion: v1
+kind: Service
+metadata:
+  name: bb
+spec:
+  selector: { app.kubernetes.io/name: bb }
+  ports: [{ name: http, port: 8080, targetPort: 8080 }]

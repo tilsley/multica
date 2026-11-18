@@ -1,0 +1,17 @@
+# Dev overrides for the official chart on kind (on top of values.yaml).
+backend:
+  uploads:
+    persistence:
+      enabled: false
+  config:
+    appEnv: development        # enables the dev verification code (secrets.dev.yaml)
+    appUrl: http://localhost:3000
+    frontendOrigin: http://localhost:3000
+    googleRedirectUri: http://localhost:3000/auth/callback
+    localUploadBaseUrl: http://localhost:8080
+    doNotTrack: "1"
+postgres:
+  persistence:
+    size: 1Gi
+ingress:
+  enabled: false               # use `skaffold dev` port-forwards instead

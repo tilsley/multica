@@ -88,6 +88,7 @@ services:
         condition: service_healthy
       mock-bb:
         condition: service_healthy
+        required: false   # docker-compose.bb.yml replaces mock-bb with real bb
     environment:
       MULTICA_SERVER_URL: http://backend:8080
       MULTICA_PAT_FILE: /state/pat
