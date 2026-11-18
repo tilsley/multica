@@ -8,23 +8,27 @@
     "typecheck": "tsc -p tsconfig.json",
     "lint": "oxlint --type-aware --deny-warnings",
     "deadcode": "knip --no-progress",
-    "test": "vitest run",
+    "test": "bun --bun vitest run",
     "verify": "bun run typecheck && bun run lint && bun run deadcode && bun run test",
-    "test:postgres": "vitest run --config vitest.postgres.config.ts"
+    "test:postgres": "bun --bun vitest run --config vitest.postgres.config.ts"
   },
   "dependencies": {
+    "@opencode/sdk": "2.3.2",
     "effect": "4.1.4",
-    "postgres": "3.4.7"
+    "postgres": "3.4.7",
+    "esbuild": "0.25.10"
   },
   "devDependencies": {
     "@effect/tsgo": "0.69.0",
     "@types/bun": "^1.4.4",
-    "esbuild": "0.25.10",
     "fast-check": "4.10.2",
     "knip": "6.45.1",
     "oxlint": "1.93.0",
     "oxlint-tsgolint": "7.0.2007",
     "typescript": "7.0.2",
     "vitest": "5.1.0"
+  },
+  "overrides": {
+    "effect": "4.1.4"
   }
 }

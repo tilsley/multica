@@ -7,9 +7,13 @@ import { toSse } from "../app/sse.ts"
 import { makeDurableCell } from "../adapters/durable-object/cell.ts"
 import { type ControlRpc, controlMailbox, makeControl } from "../adapters/durable-object/control.ts"
 import { durableDirectory, type Outcome, type TaskCellRpc } from "../adapters/durable-object/directory.ts"
+import { serveRuntime, type SessionCellRpc, sessionCellRuntime } from "../adapters/durable-object/session-runtime.ts"
 import type { DurableObjectNamespace, DurableObjectState } from "../adapters/durable-object/types.ts"
 import { defaultScript, makeScriptedRuntime } from "../adapters/fake/runtime.ts"
+import { makeOpenCodeRuntime } from "../adapters/opencode/runtime.ts"
 import { makePostgresMailbox } from "../adapters/postgres/mailbox.ts"
+import { scriptedFetch, scriptedModel, scriptedProvider } from "../adapters/scripted-model/anthropic.ts"
+import { OpenCodeWorkerd } from "@opencode/sdk/workerd"
 import { adminState, brokenBody, cutAfter, decodeTestConfig, scriptOf } from "../adapters/testkit/faults.ts"
 import { AgentRuntime, CellDirectory, type CellError, CellStore, Mailbox, Scheduler } from "../ports/index.ts"
 
@@ -19,11 +23,17 @@ import { AgentRuntime, CellDirectory, type CellError, CellStore, Mailbox, Schedu
 export interface Env {
   readonly TASKS: DurableObjectNamespace<TaskCellRpc>
   readonly CONTROL: DurableObjectNamespace<ControlRpc>
+  readonly SESSIONS: DurableObjectNamespace<SessionCellRpc>
   readonly BB_TOKEN?: string
   readonly BB_VERSION?: string
   /** "1" enables mock-bb-compatible /admin endpoints and fault injection. Tests only. */
   readonly BB_TEST_ADMIN?: string
   readonly BB_TICK_MS?: string
+  /**
+   * "opencode" (default): OpenCode runs in a session cell per conversation. "scripted": the
+   * scripted stand-in agent (the compose drills use it for slow, controllable runs).
+   */
+  readonly BB_AGENT?: string
   /** The Postgres mailbox. Without it, the control cell keeps the index (celld dev). */
   readonly DATABASE_URL?: string
 }
@@ -39,6 +49,12 @@ const control = (env: Env) => env.CONTROL.getByName("control")
 
 type CellState = DurableObjectState & { readonly id: { readonly name?: string } }
 
+/** What celld hands a session cell: OpenCode takes its storage directly. */
+type SessionState = {
+  readonly storage: Parameters<typeof OpenCodeWorkerd.create>[0]["storage"]
+  blockConcurrencyWhile<T>(fn: () => Promise<T>): Promise<T>
+}
+
 export class TaskCell extends DurableObject<Env> implements TaskCellRpc {
   private readonly context: Context.Context<cell.CellServices>
 
@@ -51,10 +67,13 @@ export class TaskCell extends DurableObject<Env> implements TaskCellRpc {
     const script = testMode(env)
       ? Effect.promise(() => control(env).faults()).pipe(Effect.map((f) => scriptOf(f.config)))
       : Effect.succeed(defaultScript)
-    const runtime = makeScriptedRuntime(defaultScript, script)
+    const runtime =
+      env.BB_AGENT === "scripted"
+        ? makeScriptedRuntime(defaultScript, script).service
+        : sessionCellRuntime(env.SESSIONS)
     this.context = Context.make(CellStore, store).pipe(
       Context.add(Scheduler, scheduler),
-      Context.add(AgentRuntime, runtime.service),
+      Context.add(AgentRuntime, runtime),
       Context.add(Mailbox, mailboxFor(env)),
       Context.add(CellSettings, { tickMs: Number(env.BB_TICK_MS ?? 1000), pollMs: 10_000, indexEveryMs: 2000 })
     )
@@ -86,7 +105,11 @@ export class TaskCell extends DurableObject<Env> implements TaskCellRpc {
   }
   async alarm() {
     await Effect.runPromiseWith(this.context)(
-      cell.tick().pipe(Effect.catchCause((c) => Effect.logError("tick failed; the next alarm retries", c)))
+      cell.tick().pipe(
+        // Tagged errors carry their text in `reason` (their .message is empty).
+        Effect.tapError((e) => Effect.logError("tick failed; the next alarm retries", { error: e._tag, reason: e.reason })),
+        Effect.catchCause((c) => Effect.logError("tick failed; the next alarm retries", c))
+      )
     )
   }
   async fetch(request: Request): Promise<Response> {
@@ -95,6 +118,34 @@ export class TaskCell extends DurableObject<Env> implements TaskCellRpc {
     if (!out.ok) return new Response(out.reason, { status: out.status })
     return new Response(out.value, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache" } })
   }
+}
+
+/**
+ * One OpenCode session (a conversation) per cell: idFromName(sessionId). The host
+ * is created under blockConcurrencyWhile, as OpenCode's Cloudflare guide
+ * prescribes: events wait until it is ready, and a turn that was running when the
+ * cell was evicted resumes when the host boots again. Task cells reach it through
+ * sessionCellRuntime, so consecutive tasks on one issue share the history.
+ */
+export class SessionCell extends DurableObject<Env> implements SessionCellRpc {
+  private readonly impl: SessionCellRpc
+
+  constructor(state: SessionState, env: Env) {
+    super(state, env)
+    const host = state.blockConcurrencyWhile(() =>
+      OpenCodeWorkerd.create({
+        storage: state.storage,
+        config: { providers: scriptedProvider, model: "scripted/bb-scripted" },
+        fetch: scriptedFetch
+      })
+    )
+    this.impl = serveRuntime(
+      makeOpenCodeRuntime({ host: () => host, model: scriptedModel, directory: "/workspace", heartbeatEveryMs: 15_000 })
+    )
+  }
+  start(...a: Parameters<SessionCellRpc["start"]>) { return this.impl.start(...a) }
+  progress(...a: Parameters<SessionCellRpc["progress"]>) { return this.impl.progress(...a) }
+  cancel(...a: Parameters<SessionCellRpc["cancel"]>) { return this.impl.cancel(...a) }
 }
 
 export class Control extends DurableObject<Env> implements ControlRpc {

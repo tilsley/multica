@@ -95,7 +95,8 @@ const putResult = (task: Task, created: boolean): PutResult => {
   }
 }
 
-export const defaultSessionId = (runId: string) => `bbsess-${runId}`
+/** OpenCode session ids must start with "ses"; bb's are ses_bb_<runId>. */
+export const defaultSessionId = (runId: string) => `ses_bb_${runId}`
 
 /**
  * PUT: creates the run (or the alias when the front resolved `retryOf` to a run).
@@ -160,7 +161,7 @@ export const cancel = Effect.fn("cell.cancel")(function* () {
   const before = yield* store.load.pipe(Effect.mapError(unavailable))
   if (before._tag === "Alias") return { _tag: "IsAlias", runId: before.runId } satisfies CancelResult
   if (before._tag === "Run" && before.status === "running") {
-    yield* runtime.cancel(before.runId).pipe(
+    yield* runtime.cancel({ runId: before.runId, sessionId: before.sessionId }).pipe(
       Effect.tapError((e) => Effect.logWarning("runtime cancel failed; recording the cancellation anyway", { reason: e.reason })),
       Effect.ignore
     )

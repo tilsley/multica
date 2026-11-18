@@ -31,6 +31,9 @@ spec:
             - { name: AWS_REGION, value: us-east-1 }
             - { name: BB_TEST_ADMIN, value: "1" }   # dev cluster: drills + mock-bb /admin API. Remove in production.
             - { name: BB_TICK_MS, value: "500" }
+            - { name: BB_AGENT, value: opencode }    # OpenCode in a session cell per conversation (scripted model until AI=claude)
+            # An isolate running OpenCode needs far more heap than celld's default.
+            - { name: CELLD_V8_HEAP_LIMIT_MB, value: "1024" }
           envFrom:
             - secretRef: { name: bb-secrets }
           ports:
@@ -40,8 +43,8 @@ spec:
             httpGet: { path: /.well-known/celld/health, port: 8080 }
             periodSeconds: 3
           resources:
-            requests: { cpu: 100m, memory: 256Mi }
-            limits: { memory: 1Gi }
+            requests: { cpu: 100m, memory: 512Mi }
+            limits: { memory: 2Gi }
 ---
 # Peer addresses for --advertise. The internal listener is unauthenticated:
 # never expose it outside the cluster.

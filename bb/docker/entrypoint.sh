@@ -7,7 +7,7 @@
 #   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION
 #   BB_ADVERTISE   host:port peers use to reach this node's internal listener
 #   BB_DEPLOY      1 to publish the deployment first (default: pods named *-0)
-#   BB_TOKEN, DATABASE_URL, BB_TEST_ADMIN, BB_TICK_MS, BB_VERSION   Worker vars
+#   BB_TOKEN, DATABASE_URL, BB_TEST_ADMIN, BB_TICK_MS, BB_VERSION, BB_AGENT   Worker vars
 set -eu
 : "${CELLD_BUCKET:?CELLD_BUCKET is required}"
 region="${AWS_REGION:-us-east-1}"
@@ -25,24 +25,34 @@ if [ "${BB_DEPLOY:-0}" = "1" ]; then
   cat > /app/wrangler.json <<JSON
 {
   "name": "bb",
-  "main": "dist/worker.js",
-  "no_bundle": true,
+  "main": "src/worker/index.ts",
   "compatibility_date": "2026-01-01",
   "compatibility_flags": ["nodejs_compat"],
   "durable_objects": { "bindings": [
     { "name": "TASKS", "class_name": "TaskCell" },
-    { "name": "CONTROL", "class_name": "Control" }
+    { "name": "CONTROL", "class_name": "Control" },
+    { "name": "SESSIONS", "class_name": "SessionCell" }
   ] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TaskCell", "Control"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["TaskCell", "Control"] },
+    { "tag": "v2", "new_sqlite_classes": ["SessionCell"] }
+  ],
   "vars": {
     "BB_TOKEN": "$(json_escape "${BB_TOKEN:-}")",
     "BB_VERSION": "$(json_escape "${BB_VERSION:-dev}")",
     "BB_TEST_ADMIN": "$(json_escape "${BB_TEST_ADMIN:-0}")",
     "BB_TICK_MS": "$(json_escape "${BB_TICK_MS:-1000}")",
+    "BB_AGENT": "$(json_escape "${BB_AGENT:-opencode}")",
     "DATABASE_URL": "$(json_escape "${DATABASE_URL:-}")"
   }
 }
 JSON
+  # celld bundles with esbuild; use the native binary from production deps.
+  if [ -z "${CELLD_ESBUILD:-}" ]; then
+    for candidate in /app/node_modules/@esbuild/*/bin/esbuild; do
+      [ -x "$candidate" ] && CELLD_ESBUILD="$candidate" && export CELLD_ESBUILD && break
+    done
+  fi
   echo "bb: publishing deployment to $CELLD_BUCKET"
   # The bucket can lag the node start (MinIO coming up): retry.
   i=0

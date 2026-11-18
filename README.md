@@ -188,7 +188,9 @@ Optional settings:
 
 **Postgres is the mailbox:** an index of every task across cells. Each cell writes to it after each commit, connecting per operation because workerd sockets are event-bound.
 
-**Status.** The agent runtime is a scripted fake for now. OpenCode (`@opencode/sdk/workerd`, already shown to boot inside a celld cell), Claude, and the agent-sandbox `Workspace` and `Sandbox` ports are next.
+**OpenCode runs the agent** (`BB_AGENT=opencode`, the default), in a *session cell* per conversation. A reply on an issue is a new Multica task that carries the session ID, so it lands in the same OpenCode session with its history. Each run reads OpenCode's durable session log, so events survive cell evictions.
+
+**Status.** The model is a scripted stand-in that speaks Anthropic's Messages API inside the cell, with no network and no key. Real Claude (`AI=claude`) and the agent-sandbox `Workspace` and `Sandbox` ports are next. Each OpenCode isolate needs `CELLD_V8_HEAP_LIMIT_MB=1024`. The compose drills use `BB_AGENT=scripted`, the old fake agent, because they need slow runs to kill mid-flight.
 
 | Command (in `bb/`) | What |
 | --- | --- |

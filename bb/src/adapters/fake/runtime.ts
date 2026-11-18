@@ -87,7 +87,7 @@ export const makeScriptedRuntime = (initial: Script = defaultScript, currentScri
         const cursor: Cursor = { start: now, emitted: -1, lastBeat: now, resumed: request.resumeSessionId ?? "", script }
         return JSON.stringify(cursor)
       }),
-    cancel: (runId) => Effect.sync(() => void control.cancelled.push(runId)),
+    cancel: ({ runId }) => Effect.sync(() => void control.cancelled.push(runId)),
     progress: (runId, raw) =>
       Effect.gen(function* () {
         yield* down

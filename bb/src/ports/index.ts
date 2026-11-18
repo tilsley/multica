@@ -57,7 +57,7 @@ export class AgentRuntime extends Context.Service<
     /** Idempotent per runId. Returns the cursor to read progress from. */
     readonly start: (input: RuntimeStart) => Effect.Effect<string, RuntimeError>
     readonly progress: (runId: string, cursor: string) => Effect.Effect<RuntimeProgress, RuntimeError>
-    readonly cancel: (runId: string) => Effect.Effect<void, RuntimeError>
+    readonly cancel: (input: { readonly runId: string; readonly sessionId: string }) => Effect.Effect<void, RuntimeError>
   }
 >()("bb/AgentRuntime") {}
 

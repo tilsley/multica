@@ -81,7 +81,7 @@ jobs:
           mkdir -p "$HOME/.local/bin"
           curl -fsSL https://github.com/denoland/celld/releases/download/v0.6.2/celld-x86_64-unknown-linux-gnu.gz | gzip -dc > "$HOME/.local/bin/celld"
           chmod +x "$HOME/.local/bin/celld"
-          PATH="$PWD/node_modules/.bin:$HOME/.local/bin:$PATH" celld dev . --port 18787 --no-watch > celld.log 2>&1 &
+          PATH="$PWD/node_modules/.bin:$HOME/.local/bin:$PATH" CELLD_V8_HEAP_LIMIT_MB=1024 celld dev . --port 18787 --no-watch > celld.log 2>&1 &
           for _ in $(seq 60); do curl -sf localhost:18787/health && break; sleep 1; done
           ../scripts/apply-overlay.sh
           cd ../upstream/server && BB_CONTRACT_URL=http://127.0.0.1:18787 BB_CONTRACT_TOKEN=local-bb-token \

@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 #
-# bb: a celld node with the bb Worker deployment baked in.
+# bb: a celld node with the bb Worker project baked in.
 #   docker build -t bb ./bb
 # The same image runs every node of the fleet; pod 0 (BB_DEPLOY=1) publishes the
 # deployment to the fleet bucket before it starts serving.
@@ -16,18 +16,16 @@ ADD --checksum=sha256:ce0ee3552cc8d55dde3998dc3b1b0c8f547bbcb4bc803d2a94842368b0
 FROM scratch AS celld-arm64
 ADD --checksum=sha256:4eca87c6797590000a344c1b768364e9696e8817f5fbc16193f459d2edac7cd0 \
     https://github.com/denoland/celld/releases/download/v0.6.2/celld-aarch64-unknown-linux-gnu.gz /celld.gz
-# --- bundle the Worker once, so nodes need no esbuild -------------------------
-FROM ${BUN_IMAGE} AS bundle
+# --- production dependencies -------------------------------------------------
+# celld bundles the Worker itself at deploy (as `celld dev` does): its bundler
+# serves Node built-ins and CommonJS the way celld's runtime expects, which a
+# pre-built bundle cannot match (celld has no node:module.createRequire).
+FROM ${BUN_IMAGE} AS deps
 WORKDIR /src
 COPY package.json bun.lock ./
 RUN --mount=type=secret,id=extra_ca,required=false \
     if [ -s /run/secrets/extra_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/extra_ca; fi; \
-    bun install --frozen-lockfile --ignore-scripts
-COPY tsconfig.json ./
-COPY src ./src
-RUN ./node_modules/.bin/esbuild src/worker/index.ts --bundle --format=esm --platform=neutral \
-      --main-fields=module,main --conditions=workerd,worker,import --external:cloudflare:workers \
-      --external:'node:*' --outfile=dist/worker.js
+    bun install --production --frozen-lockfile --ignore-scripts
 
 # --- runtime ----------------------------------------------------------------
 FROM ${RUNTIME_IMAGE}
@@ -39,8 +37,11 @@ ARG TARGETARCH
 RUN gzip -dc "/tmp/celld-${TARGETARCH:-amd64}.gz" > /usr/local/bin/celld && chmod 755 /usr/local/bin/celld && rm /tmp/celld-*.gz \
  && useradd --system --create-home --home-dir /var/lib/bb bb \
  && mkdir -p /app && chown bb:bb /app
-# /app is the celld project: the entrypoint writes wrangler.json beside the bundle.
-COPY --from=bundle --chown=bb:bb /src/dist/worker.js /app/dist/worker.js
+# /app is the celld project: sources + production deps; the entrypoint writes
+# wrangler.json and `celld deploy` bundles it.
+COPY --from=deps --chown=bb:bb /src/node_modules /app/node_modules
+COPY --chown=bb:bb package.json tsconfig.json /app/
+COPY --chown=bb:bb src /app/src
 COPY docker/entrypoint.sh /usr/local/bin/bb-entrypoint
 USER bb
 WORKDIR /app

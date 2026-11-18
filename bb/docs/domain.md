@@ -48,6 +48,14 @@ Each has a property-based test that names it (`test/domain.test.ts`).
 
 Multica creates a new task row for each automatic retry, with `parent_task_id` pointing at the failed attempt, and the daemon sends it as `retryOf`. On `Create` with `retryOf`, the app asks the parent's cell to **resolve** it: a run returns its own ID, an alias returns its target, an absent task returns nothing. If a run ID comes back, the new task becomes an `Alias` of it; otherwise it becomes a new `Run`. A chain of retries therefore always lands on the first run.
 
+## Sessions
+
+A run's agent is OpenCode, in a **session cell**: one Durable Object per OpenCode session (`idFromName(sessionId)`, ids `ses_bb_<runId>`). Task cells hold bb's state and event log and reach their session cell through `sessionCellRuntime`.
+
+A reply in Multica is a *new task* carrying the previous session id. It resolves to the same session cell, so the conversation's history is there. Each run is one prompt into the session, with id `msg_bb_<runId>`. Its events are the session's durable log after that prompt.
+
+`start` is idempotent because it checks the log for the prompt: OpenCode would run a repeated prompt id again.
+
 ## Where things live
 
 | Layer | Folder | May import |
@@ -55,5 +63,5 @@ Multica creates a new task row for each automatic retry, with `parent_task_id` p
 | Domain (this file) | `src/domain` | `effect` only |
 | Ports (Effect services) | `src/ports` | domain, `effect` |
 | Use cases + HTTP handlers | `src/app` | ports, domain |
-| Adapters (fake, Durable Object, Postgres, OpenCode, Claude, agent-sandbox) | `src/adapters/*` | anything |
+| Adapters (fake, Durable Object incl. session cells, Postgres, OpenCode, scripted model; Claude and agent-sandbox next) | `src/adapters/*` | anything |
 | Composition roots | `src/worker` (celld), `src/dev` | anything |

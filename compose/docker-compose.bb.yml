@@ -24,6 +24,9 @@ x-bb-node: &bb-node
     BB_TOKEN: ${MULTICA_BB_TOKEN:-local-bb-token}
     BB_TEST_ADMIN: "1"
     BB_TICK_MS: "500"
+    # The drills need slow, controllable runs (they kill things mid-run), so they
+    # use the scripted agent; OpenCode's scripted model answers in under a second.
+    BB_AGENT: scripted
     DATABASE_URL: postgres://bb:bb@bb-postgres:5432/bb
   stop_grace_period: 45s   # above celld's 40s handoff bound
   restart: unless-stopped

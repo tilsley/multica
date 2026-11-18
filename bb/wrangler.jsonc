@@ -7,14 +7,19 @@
   "durable_objects": {
     "bindings": [
       { "name": "TASKS", "class_name": "TaskCell" },
-      { "name": "CONTROL", "class_name": "Control" }
+      { "name": "CONTROL", "class_name": "Control" },
+      { "name": "SESSIONS", "class_name": "SessionCell" }
     ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TaskCell", "Control"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["TaskCell", "Control"] },
+    { "tag": "v2", "new_sqlite_classes": ["SessionCell"] }
+  ],
   "vars": {
     "BB_TOKEN": "local-bb-token",
     "BB_VERSION": "dev",
     "BB_TEST_ADMIN": "1",
-    "BB_TICK_MS": "250"
+    "BB_TICK_MS": "250",
+    "BB_AGENT": "opencode"
   }
 }
