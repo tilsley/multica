@@ -32,6 +32,8 @@ export class CellSettings extends Context.Service<
     readonly tickMs: number
     /** Longest an events stream waits for a new entry before re-checking. */
     readonly pollMs: number
+    /** Progress (event count) reaches the mailbox index at most this often; state changes always do. */
+    readonly indexEveryMs: number
   }
 >()("bb/CellSettings") {}
 
@@ -52,10 +54,15 @@ const summarize = (task: Task, now: number): TaskSummary => ({
   updatedAt: now
 })
 
+// When this cell instance last wrote the index. In memory: an evicted cell simply
+// indexes again on its next change.
+const lastIndexed = new WeakMap<object, number>()
+
 /** decide, commit, then index. The index is best effort: the cell is the truth. */
 const apply = Effect.fnUntraced(function* (command: (now: number) => Command) {
   const store = yield* CellStore
   const mailbox = yield* Mailbox
+  const { indexEveryMs } = yield* CellSettings
   const now = yield* Clock.currentTimeMillis
   const task = yield* store.load.pipe(Effect.mapError(unavailable))
   const result = decide(task, command(now))
@@ -63,10 +70,15 @@ const apply = Effect.fnUntraced(function* (command: (now: number) => Command) {
   const decision: Decision = result.success
   if (decision.outcome !== "AlreadyExists" && decision.outcome !== "Unchanged") {
     yield* store.commit(decision.task, decision.appended).pipe(Effect.mapError(unavailable))
-    yield* mailbox.record(summarize(decision.task, now)).pipe(
-      Effect.tapError((e) => Effect.logWarning("mailbox index write failed; the cell stays authoritative", { reason: e.reason })),
-      Effect.ignore
-    )
+    const progressOnly =
+      decision.outcome === "Recorded" && decision.task._tag === "Run" && decision.task.status === "running"
+    if (!progressOnly || now - (lastIndexed.get(store) ?? 0) >= indexEveryMs) {
+      lastIndexed.set(store, now)
+      yield* mailbox.record(summarize(decision.task, now)).pipe(
+        Effect.tapError((e) => Effect.logWarning("mailbox index write failed; the cell stays authoritative", { reason: e.reason })),
+        Effect.ignore
+      )
+    }
   }
   return result
 })

@@ -17,7 +17,7 @@ export const makeStack = async (script: Partial<Script> = {}) => {
   const cells = makeFakeCells({
     runtime: runtime.service,
     mailbox: mailbox.service,
-    settings: { tickMs: 10, pollMs: 50 }
+    settings: { tickMs: 10, pollMs: 50, indexEveryMs: 0 }
   })
   const context = Context.make(CellDirectory, cells.directory).pipe(
     Context.add(FrontSettings, { token, version: "test" })

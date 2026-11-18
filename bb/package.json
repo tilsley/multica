@@ -9,10 +9,12 @@
     "lint": "oxlint --type-aware --deny-warnings",
     "deadcode": "knip --no-progress",
     "test": "vitest run",
-    "verify": "bun run typecheck && bun run lint && bun run deadcode && bun run test"
+    "verify": "bun run typecheck && bun run lint && bun run deadcode && bun run test",
+    "test:postgres": "vitest run --config vitest.postgres.config.ts"
   },
   "dependencies": {
-    "effect": "4.1.4"
+    "effect": "4.1.4",
+    "postgres": "3.4.7"
   },
   "devDependencies": {
     "@effect/tsgo": "0.69.0",

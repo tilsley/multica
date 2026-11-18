@@ -9,6 +9,7 @@ import { type ControlRpc, controlMailbox, makeControl } from "../adapters/durabl
 import { durableDirectory, type Outcome, type TaskCellRpc } from "../adapters/durable-object/directory.ts"
 import type { DurableObjectNamespace, DurableObjectState } from "../adapters/durable-object/types.ts"
 import { defaultScript, makeScriptedRuntime } from "../adapters/fake/runtime.ts"
+import { makePostgresMailbox } from "../adapters/postgres/mailbox.ts"
 import { adminState, brokenBody, cutAfter, decodeTestConfig, scriptOf } from "../adapters/testkit/faults.ts"
 import { AgentRuntime, CellDirectory, type CellError, CellStore, Mailbox, Scheduler } from "../ports/index.ts"
 
@@ -23,9 +24,17 @@ export interface Env {
   /** "1" enables mock-bb-compatible /admin endpoints and fault injection. Tests only. */
   readonly BB_TEST_ADMIN?: string
   readonly BB_TICK_MS?: string
+  /** The Postgres mailbox. Without it, the control cell keeps the index (celld dev). */
+  readonly DATABASE_URL?: string
 }
 
 const testMode = (env: Env) => env.BB_TEST_ADMIN === "1"
+
+// workerd binds a socket to the event (request or alarm) that opened it, so in
+// the Worker every Postgres call opens and closes its own connection.
+const postgresFor = (url: string) => makePostgresMailbox(url, { mode: "per-operation" })
+const mailboxFor = (env: Env): Mailbox["Service"] =>
+  env.DATABASE_URL ? postgresFor(env.DATABASE_URL).service : controlMailbox(env.CONTROL)
 const control = (env: Env) => env.CONTROL.getByName("control")
 
 type CellState = DurableObjectState & { readonly id: { readonly name?: string } }
@@ -46,8 +55,8 @@ export class TaskCell extends DurableObject<Env> implements TaskCellRpc {
     this.context = Context.make(CellStore, store).pipe(
       Context.add(Scheduler, scheduler),
       Context.add(AgentRuntime, runtime.service),
-      Context.add(Mailbox, controlMailbox(env.CONTROL)),
-      Context.add(CellSettings, { tickMs: Number(env.BB_TICK_MS ?? 1000), pollMs: 10_000 })
+      Context.add(Mailbox, mailboxFor(env)),
+      Context.add(CellSettings, { tickMs: Number(env.BB_TICK_MS ?? 1000), pollMs: 10_000, indexEveryMs: 2000 })
     )
   }
 
@@ -107,9 +116,13 @@ const json = (status: number, body: unknown) =>
 
 const admin = async (request: Request, env: Env, path: string): Promise<Response> => {
   const c = control(env)
-  if (path === "/admin/state") return json(200, adminState(await c.list(), (await c.faults()).config))
+  if (path === "/admin/state") {
+    const rows = await Effect.runPromise(mailboxFor(env).list)
+    return json(200, adminState(rows, (await c.faults()).config))
+  }
   if (path === "/admin/reset" && request.method === "POST") {
     await c.reset()
+    if (env.DATABASE_URL) await postgresFor(env.DATABASE_URL).truncate()
     return json(200, { status: "reset" })
   }
   if (path === "/admin/config") {

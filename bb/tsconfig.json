@@ -22,5 +22,5 @@
     "types": ["bun"],
     "plugins": [{ "name": "@effect/language-service" }]
   },
-  "include": ["src", "test", "vitest.config.ts"]
+  "include": ["src", "test", "vitest.config.ts", "vitest.postgres.config.ts"]
 }
