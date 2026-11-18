@@ -1,0 +1,20 @@
+{
+  // bb on celld: the Worker front plus one Durable Object (cell) per task.
+  "name": "bb",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      { "name": "TASKS", "class_name": "TaskCell" },
+      { "name": "CONTROL", "class_name": "Control" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TaskCell", "Control"] }],
+  "vars": {
+    "BB_TOKEN": "local-bb-token",
+    "BB_VERSION": "dev",
+    "BB_TEST_ADMIN": "1",
+    "BB_TICK_MS": "250"
+  }
+}

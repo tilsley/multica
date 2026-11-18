@@ -13,3 +13,6 @@ Effect v4 (`effect@4.1.4`). v3 APIs are wrong here. See `/home/user/campaign-man
 
 ## Tests
 Every invariant in `docs/domain.md` has a property test that names it. When adding a test for a rule, break the rule briefly and see it go red.
+
+## Running on celld
+`celld dev . --port 18787` (needs `esbuild` on PATH: `node_modules/.bin`). `wrangler.jsonc` sets test mode (`BB_TEST_ADMIN=1`), which exposes mock-bb's `/admin/*` endpoints and fault switches so `../scripts/contract-test.sh`-style Go tests and the compose drills run unchanged against real bb. The Go contract test: `BB_CONTRACT_URL=http://127.0.0.1:18787 BB_CONTRACT_TOKEN=local-bb-token go test ./pkg/agent -run BBContract` from `upstream/server` with the overlay applied.

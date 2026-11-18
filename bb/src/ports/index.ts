@@ -70,6 +70,7 @@ export interface TaskSummary {
   readonly issue: string | undefined
   readonly resumedFrom: string | undefined
   readonly eventCount: number
+  readonly createdAt: number
   readonly updatedAt: number
 }
 

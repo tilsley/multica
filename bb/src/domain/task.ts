@@ -1,32 +1,36 @@
-import { Data, Result } from "effect"
-import { type AgentEvent, isResult, type LogEntry, type ResultEvent, type ResultStatus } from "./events.ts"
-import type { TaskRequest } from "./request.ts"
+import { Data, Result, Schema } from "effect"
+import { type AgentEvent, isResult, type LogEntry, type ResultEvent } from "./events.ts"
+import { TaskRequest } from "./request.ts"
 
 // The task state machine (docs/domain.md, "Task" and "Commands"). Pure: callers
 // pass `now` and every generated value in.
 
-export type RunStatus = "running" | ResultStatus
+export const RunStatus = Schema.Literals(["running", "succeeded", "failed", "cancelled"])
+export type RunStatus = typeof RunStatus.Type
 
-export type Task =
-  | { readonly _tag: "Absent"; readonly taskId: string }
-  | { readonly _tag: "Tombstone"; readonly taskId: string; readonly at: number }
-  | { readonly _tag: "Alias"; readonly taskId: string; readonly runId: string; readonly at: number }
-  | Run
-
-export interface Run {
-  readonly _tag: "Run"
-  readonly taskId: string
-  readonly runId: string
-  readonly status: RunStatus
-  readonly sessionId: string
-  readonly request: TaskRequest
-  readonly createdAt: number
+export const Run = Schema.TaggedStruct("Run", {
+  taskId: Schema.String,
+  runId: Schema.String,
+  status: RunStatus,
+  sessionId: Schema.String,
+  request: TaskRequest,
+  createdAt: Schema.Finite,
   /** Sequence number of the last log entry (0 before the first). */
-  readonly lastSeq: number
+  lastSeq: Schema.Int,
   /** Opaque runtime cursor: where the agent runtime's progress was read up to. */
-  readonly cursor: string
-  readonly lastEventAt: number
-}
+  cursor: Schema.String,
+  lastEventAt: Schema.Finite
+})
+export type Run = typeof Run.Type
+
+/** Also the persisted form of a cell's task (decoded on load). */
+export const Task = Schema.Union([
+  Schema.TaggedStruct("Absent", { taskId: Schema.String }),
+  Schema.TaggedStruct("Tombstone", { taskId: Schema.String, at: Schema.Finite }),
+  Schema.TaggedStruct("Alias", { taskId: Schema.String, runId: Schema.String, at: Schema.Finite }),
+  Run
+])
+export type Task = typeof Task.Type
 
 export type Command =
   | { readonly _tag: "Create"; readonly request: TaskRequest; readonly sessionId: string; readonly now: number }

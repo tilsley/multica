@@ -71,7 +71,7 @@ export interface ScriptedRuntimeControl {
   unavailable: boolean
 }
 
-export const makeScriptedRuntime = (initial: Script = defaultScript) => {
+export const makeScriptedRuntime = (initial: Script = defaultScript, currentScript?: Effect.Effect<Script>) => {
   const control: ScriptedRuntimeControl = { script: initial, started: [], cancelled: [], unavailable: false }
   const down = Effect.suspend(() =>
     control.unavailable ? Effect.fail(new RuntimeError({ reason: "scripted runtime unavailable", retryable: true })) : Effect.void
@@ -83,7 +83,8 @@ export const makeScriptedRuntime = (initial: Script = defaultScript) => {
         yield* down
         const now = yield* Clock.currentTimeMillis
         if (!control.started.includes(runId)) control.started.push(runId)
-        const cursor: Cursor = { start: now, emitted: -1, lastBeat: now, resumed: request.resumeSessionId ?? "", script: control.script }
+        const script = currentScript ? yield* currentScript : control.script
+        const cursor: Cursor = { start: now, emitted: -1, lastBeat: now, resumed: request.resumeSessionId ?? "", script }
         return JSON.stringify(cursor)
       }),
     cancel: (runId) => Effect.sync(() => void control.cancelled.push(runId)),

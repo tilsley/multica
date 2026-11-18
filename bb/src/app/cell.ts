@@ -48,6 +48,7 @@ const summarize = (task: Task, now: number): TaskSummary => ({
   issue: task._tag === "Run" ? task.request.issue?.identifier : undefined,
   resumedFrom: task._tag === "Run" ? task.request.resumeSessionId : undefined,
   eventCount: task._tag === "Run" ? task.lastSeq : 0,
+  createdAt: task._tag === "Run" ? task.createdAt : task._tag === "Absent" ? now : task.at,
   updatedAt: now
 })
 
