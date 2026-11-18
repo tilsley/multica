@@ -1,0 +1,55 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "extends": ["./node_modules/@effect/tsgo/oxlint-presets/recommended.json"],
+  "plugins": ["typescript", "unicorn", "oxc", "import", "vitest"],
+  "categories": { "correctness": "error", "suspicious": "error", "perf": "warn" },
+  "options": { "typeAware": true },
+  "rules": {
+    "typescript/no-explicit-any": "error",
+    "typescript/no-floating-promises": "error",
+    "typescript/switch-exhaustiveness-check": "error",
+    "typescript/no-non-null-assertion": "error",
+    "no-console": "error",
+    "import/no-cycle": "error",
+    "no-underscore-dangle": ["error", { "allow": ["_tag", "_op"] }],
+    "typescript/consistent-return": "off"
+  },
+  "ignorePatterns": ["node_modules", "dist", ".wrangler", ".celld"],
+  "overrides": [
+    {
+      // Layers, innermost first: domain <- ports <- app <- adapters <- worker/dev (composition roots).
+      "files": ["src/domain/**"],
+      "rules": {
+        "no-restricted-imports": ["error", { "patterns": [
+          { "group": ["*", "!effect", "!effect/**", "!./**", "!../domain/**"], "message": "src/domain is pure: it may import only effect and other domain files. See docs/domain.md." },
+          { "group": ["**/ports/**", "**/app/**", "**/adapters/**", "**/worker/**", "**/dev/**"], "message": "src/domain must not depend on outer layers." }
+        ] }]
+      }
+    },
+    {
+      "files": ["src/ports/**"],
+      "rules": {
+        "no-restricted-imports": ["error", { "patterns": [
+          { "group": ["*", "!effect", "!effect/**", "!./**", "!../domain/**", "!../ports/**"], "message": "src/ports defines interfaces only: effect and the domain." },
+          { "group": ["**/app/**", "**/adapters/**", "**/worker/**", "**/dev/**"], "message": "src/ports must not depend on outer layers." }
+        ] }]
+      }
+    },
+    {
+      "files": ["src/app/**"],
+      "rules": {
+        "no-restricted-imports": ["error", { "patterns": [
+          { "group": ["**/adapters/**", "**/worker/**", "**/dev/**"], "message": "Use cases depend on ports, never on adapters. Wire adapters at a composition root (src/worker, src/dev) or in tests." }
+        ] }]
+      }
+    },
+    {
+      "files": ["test/**"],
+      "rules": {
+        "vitest/no-conditional-expect": "off",
+        "vitest/expect-expect": ["error", { "assertFunctionNames": ["expect", "fc.assert"] }],
+        "no-await-in-loop": "off"
+      }
+    }
+  ]
+}

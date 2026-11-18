@@ -1,0 +1,27 @@
+{
+  "name": "bb",
+  "private": true,
+  "type": "module",
+  "description": "bb: the coding agent behind Multica. OpenCode in celld Durable Objects (one cell per task), Postgres mailbox, S3.",
+  "scripts": {
+    "prepare": "effect-tsgo patch --typescript --oxlint",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "oxlint --type-aware --deny-warnings",
+    "deadcode": "knip --no-progress",
+    "test": "vitest run",
+    "verify": "bun run typecheck && bun run lint && bun run deadcode && bun run test"
+  },
+  "dependencies": {
+    "effect": "4.1.4"
+  },
+  "devDependencies": {
+    "@effect/tsgo": "0.69.0",
+    "@types/bun": "^1.4.4",
+    "fast-check": "4.10.2",
+    "knip": "6.45.1",
+    "oxlint": "1.93.0",
+    "oxlint-tsgolint": "7.0.2007",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
