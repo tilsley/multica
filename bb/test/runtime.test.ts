@@ -3,7 +3,6 @@ import { afterAll, describe, expect, it } from "vitest"
 import { defaultScript, makeScriptedRuntime } from "../src/adapters/fake/runtime.ts"
 import { serveRuntime, sessionCellRuntime } from "../src/adapters/durable-object/session-runtime.ts"
 import { makeOpenCodeRuntime } from "../src/adapters/opencode/runtime.ts"
-import { scriptedModel } from "../src/adapters/scripted-model/anthropic.ts"
 import { defaultSessionId } from "../src/app/cell.ts"
 import { makeOpenCodeHost } from "./opencode-host.ts"
 import { drive, request, runtimeContract } from "./runtime-contract.ts"
@@ -20,7 +19,7 @@ runtimeContract(
 const host = await makeOpenCodeHost()
 afterAll(() => host.close())
 const opencode = () =>
-  makeOpenCodeRuntime({ host: async () => host.host, model: scriptedModel, directory: host.dir, heartbeatEveryMs: 50 })
+  makeOpenCodeRuntime({ host: async () => host.host, model: host.ref, directory: host.dir, heartbeatEveryMs: 50 })
 
 runtimeContract("OpenCode", async () => opencode(), defaultSessionId)
 

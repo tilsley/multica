@@ -7,7 +7,10 @@
 #   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION
 #   BB_ADVERTISE   host:port peers use to reach this node's internal listener
 #   BB_DEPLOY      1 to publish the deployment first (default: pods named *-0)
-#   BB_TOKEN, DATABASE_URL, BB_TEST_ADMIN, BB_TICK_MS, BB_VERSION, BB_AGENT   Worker vars
+#   BB_TOKEN, DATABASE_URL, BB_TEST_ADMIN, BB_TICK_MS, BB_VERSION, BB_AGENT,
+#   BB_MODEL, ANTHROPIC_API_KEY, BB_CLAUDE_MODEL, ANTHROPIC_BASE_URL   Worker vars
+#   (celld has only plain vars: a key set here is stored in the fleet bucket. Fine
+#   for kind; production uses Bedrock through a signing proxy instead.)
 set -eu
 : "${CELLD_BUCKET:?CELLD_BUCKET is required}"
 region="${AWS_REGION:-us-east-1}"
@@ -43,6 +46,10 @@ if [ "${BB_DEPLOY:-0}" = "1" ]; then
     "BB_TEST_ADMIN": "$(json_escape "${BB_TEST_ADMIN:-0}")",
     "BB_TICK_MS": "$(json_escape "${BB_TICK_MS:-1000}")",
     "BB_AGENT": "$(json_escape "${BB_AGENT:-opencode}")",
+    "BB_MODEL": "$(json_escape "${BB_MODEL:-scripted}")",
+    "ANTHROPIC_API_KEY": "$(json_escape "${ANTHROPIC_API_KEY:-}")",
+    "BB_CLAUDE_MODEL": "$(json_escape "${BB_CLAUDE_MODEL:-}")",
+    "ANTHROPIC_BASE_URL": "$(json_escape "${ANTHROPIC_BASE_URL:-}")",
     "DATABASE_URL": "$(json_escape "${DATABASE_URL:-}")"
   }
 }

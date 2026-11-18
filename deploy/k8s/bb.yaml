@@ -31,11 +31,17 @@ spec:
             - { name: AWS_REGION, value: us-east-1 }
             - { name: BB_TEST_ADMIN, value: "1" }   # dev cluster: drills + mock-bb /admin API. Remove in production.
             - { name: BB_TICK_MS, value: "500" }
-            - { name: BB_AGENT, value: opencode }    # OpenCode in a session cell per conversation (scripted model until AI=claude)
+            - { name: BB_AGENT, value: opencode }    # OpenCode in a session cell per conversation
             # An isolate running OpenCode needs far more heap than celld's default.
             - { name: CELLD_V8_HEAP_LIMIT_MB, value: "1024" }
           envFrom:
             - secretRef: { name: bb-secrets }
+            # Optional: the model. Without it bb uses the scripted model. For Claude:
+            #   kubectl --context kind-bb create secret generic bb-model \
+            #     --from-literal=BB_MODEL=claude --from-literal=ANTHROPIC_API_KEY=...
+            #   kubectl --context kind-bb rollout restart statefulset/bb
+            # (BB_CLAUDE_MODEL overrides the default model, claude-opus-5-5.)
+            - secretRef: { name: bb-model, optional: true }
           ports:
             - { containerPort: 8080, name: http }
             - { containerPort: 8081, name: peer }

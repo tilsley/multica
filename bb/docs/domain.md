@@ -56,6 +56,17 @@ A reply in Multica is a *new task* carrying the previous session id. It resolves
 
 `start` is idempotent because it checks the log for the prompt: OpenCode would run a repeated prompt id again.
 
+## Models
+
+OpenCode's model is configuration, not code (`BB_MODEL`, `src/adapters/model`):
+
+| `BB_MODEL` | Model | Reaches |
+| --- | --- | --- |
+| `scripted` (default) | A stand-in that speaks Anthropic's Messages API from inside the Worker: deterministic, no key. | nothing |
+| `claude` | Claude over Anthropic's API, `ANTHROPIC_API_KEY`; `BB_CLAUDE_MODEL` (default `claude-opus-5-5`). | the API host only |
+
+Both use OpenCode's Anthropic-compatible provider, and OpenCode's outbound `fetch` reaches only the model's host. celld has only plain vars, so a key is stored with the deployment in the fleet bucket: acceptable on kind, not in production. Production will use Bedrock with the pod's IAM role; the Worker cannot see the pod's credentials, so a signing proxy next to celld will sign requests (a later mode).
+
 ## Where things live
 
 | Layer | Folder | May import |

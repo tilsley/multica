@@ -15,8 +15,6 @@ export const scriptedProvider = {
   }
 } as const
 
-export const scriptedModel = { providerID: "scripted", id: "bb-scripted" } as const
-
 const frame = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
 
 /** The last user message's text, without the Multica brief bb prepends. */
@@ -58,7 +56,8 @@ const messageStream = (text: string, model: string) =>
     frame("message_stop", { type: "message_stop" })
   ].join("")
 
-const handleScripted = async (request: Request): Promise<Response> => {
+/** Answers one Messages API request with the scripted reply (whatever host it was sent to). */
+export const scriptedMessages = async (request: Request): Promise<Response> => {
   if (request.method !== "POST" || !new URL(request.url).pathname.endsWith("/messages")) {
     return new Response(JSON.stringify({ type: "error", error: { type: "not_found_error", message: "scripted model: only POST /v1/messages" } }), { status: 404 })
   }
@@ -73,6 +72,6 @@ const handleScripted = async (request: Request): Promise<Response> => {
  */
 export const scriptedFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   const request = new Request(input, init)
-  if (new URL(request.url).hostname === scriptedHost) return handleScripted(request)
+  if (new URL(request.url).hostname === scriptedHost) return scriptedMessages(request)
   return new Response(`bb: outbound request to ${new URL(request.url).hostname} refused`, { status: 403 })
 }

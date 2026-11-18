@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers"
-import { Context, Effect, Exit } from "effect"
+import { Context, Effect, Exit, Result } from "effect"
 import * as cell from "../app/cell.ts"
 import { CellSettings } from "../app/cell.ts"
 import { FrontSettings, makeHandler } from "../app/http.ts"
@@ -12,7 +12,7 @@ import type { DurableObjectNamespace, DurableObjectState } from "../adapters/dur
 import { defaultScript, makeScriptedRuntime } from "../adapters/fake/runtime.ts"
 import { makeOpenCodeRuntime } from "../adapters/opencode/runtime.ts"
 import { makePostgresMailbox } from "../adapters/postgres/mailbox.ts"
-import { scriptedFetch, scriptedModel, scriptedProvider } from "../adapters/scripted-model/anthropic.ts"
+import { modelSetup } from "../adapters/model/index.ts"
 import { OpenCodeWorkerd } from "@opencode/sdk/workerd"
 import { adminState, brokenBody, cutAfter, decodeTestConfig, scriptOf } from "../adapters/testkit/faults.ts"
 import { AgentRuntime, CellDirectory, type CellError, CellStore, Mailbox, Scheduler } from "../ports/index.ts"
@@ -34,6 +34,12 @@ export interface Env {
    * scripted stand-in agent (the compose drills use it for slow, controllable runs).
    */
   readonly BB_AGENT?: string
+  /** Which model OpenCode uses: "scripted" (default) or "claude" (src/adapters/model). */
+  readonly BB_MODEL?: string
+  /** BB_MODEL=claude. A plain var: celld has no secrets yet, so fine on kind, not for production. */
+  readonly ANTHROPIC_API_KEY?: string
+  readonly BB_CLAUDE_MODEL?: string
+  readonly ANTHROPIC_BASE_URL?: string
   /** The Postgres mailbox. Without it, the control cell keeps the index (celld dev). */
   readonly DATABASE_URL?: string
 }
@@ -132,15 +138,19 @@ export class SessionCell extends DurableObject<Env> implements SessionCellRpc {
 
   constructor(state: SessionState, env: Env) {
     super(state, env)
+    // A bad model setting fails every run with the reason, rather than the cell.
+    const setup = modelSetup(env, (input, init) => fetch(input, init))
+    if (Result.isFailure(setup)) {
+      const reason = setup.failure.reason
+      this.impl = { start: async () => ({ ok: false, reason, retryable: false }), progress: async () => ({ ok: false, reason, retryable: false }), cancel: async () => ({ ok: true, value: undefined }) }
+      return
+    }
+    const model = setup.success
     const host = state.blockConcurrencyWhile(() =>
-      OpenCodeWorkerd.create({
-        storage: state.storage,
-        config: { providers: scriptedProvider, model: "scripted/bb-scripted" },
-        fetch: scriptedFetch
-      })
+      OpenCodeWorkerd.create({ storage: state.storage, config: { providers: model.providers, model: model.model }, fetch: model.fetch })
     )
     this.impl = serveRuntime(
-      makeOpenCodeRuntime({ host: () => host, model: scriptedModel, directory: "/workspace", heartbeatEveryMs: 15_000 })
+      makeOpenCodeRuntime({ host: () => host, model: model.ref, directory: "/workspace", heartbeatEveryMs: 15_000 })
     )
   }
   start(...a: Parameters<SessionCellRpc["start"]>) { return this.impl.start(...a) }
