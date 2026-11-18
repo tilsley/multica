@@ -3,6 +3,7 @@
   "ignoreExportsUsedInFile": true,
   "entry": [
     "src/worker/index.ts",
+    "src/gateway/main.ts",
     "test/**/*.ts"
   ],
   "project": [

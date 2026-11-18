@@ -17,25 +17,41 @@ export const scriptedProvider = {
 
 const frame = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
 
-/** The last user message's text, without the Multica brief bb prepends. */
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null
+
+const messagesOf = (body: unknown): ReadonlyArray<unknown> => (isObject(body) && Array.isArray(body.messages) ? body.messages : [])
+
+/** A user message's own text (tool results are not text the user wrote). */
+const userText = (m: unknown): string => {
+  if (!isObject(m) || m.role !== "user") return ""
+  const content = m.content
+  if (typeof content === "string") return content
+  if (!Array.isArray(content)) return ""
+  return content.map((c: unknown) => (isObject(c) && c.type === "text" && typeof c.text === "string" ? c.text : "")).join("\n")
+}
+
+/** The last user text, without the Multica brief bb prepends. */
 const lastUserText = (body: unknown): string => {
-  if (typeof body !== "object" || body === null || !("messages" in body) || !Array.isArray(body.messages)) return ""
-  const user = body.messages.findLast((m: unknown) => typeof m === "object" && m !== null && "role" in m && m.role === "user")
-  const content: unknown = typeof user === "object" && user !== null && "content" in user ? user.content : ""
-  const text =
-    typeof content === "string"
-      ? content
-      : Array.isArray(content)
-        ? content.map((c: unknown) => (typeof c === "object" && c !== null && "text" in c && typeof c.text === "string" ? c.text : "")).join("\n")
-        : ""
+  const text = messagesOf(body).map(userText).findLast((t) => t.trim() !== "") ?? ""
   return text.replace(/<multica-runtime-brief>[\s\S]*?<\/multica-runtime-brief>\s*/g, "").trim()
 }
 
 /** How many user turns the conversation has so far: proves history reached the model. */
-const userTurns = (body: unknown): number =>
-  typeof body === "object" && body !== null && "messages" in body && Array.isArray(body.messages)
-    ? body.messages.filter((m: unknown) => typeof m === "object" && m !== null && "role" in m && m.role === "user").length
-    : 0
+const userTurns = (body: unknown): number => messagesOf(body).filter((m) => userText(m).trim() !== "").length
+
+/** The text of the tool results in the last message, if it carries any. */
+const toolResults = (body: unknown): string | undefined => {
+  const last = messagesOf(body).at(-1)
+  if (!isObject(last) || last.role !== "user" || !Array.isArray(last.content)) return undefined
+  const results: Array<unknown> = last.content.filter((c: unknown) => isObject(c) && c.type === "tool_result")
+  if (results.length === 0) return undefined
+  const text = (c: unknown): string =>
+    typeof c === "string" ? c : Array.isArray(c) ? c.map(text).join("") : isObject(c) && typeof c.text === "string" ? c.text : ""
+  return results.map((r) => (isObject(r) ? text(r.content) : "")).join("\n")
+}
+
+/** `run: <command>` in the task asks the scripted model to run that shell command. */
+const scriptedCommand = (body: unknown): string | undefined => /^run: (.+)$/m.exec(lastUserText(body))?.[1]?.trim()
 
 /** The scripted reply for a request: acknowledges the task in a stable, testable form. */
 export const scriptedReply = (body: unknown): string => {
@@ -43,18 +59,42 @@ export const scriptedReply = (body: unknown): string => {
   return `bb (scripted model) received the task: "${task}" (turn ${userTurns(body)} of this conversation). With a real model I would clone the repository, make the change in a sandbox and open a pull request.`
 }
 
+const start = (model: string) =>
+  frame("message_start", {
+    type: "message_start",
+    message: { id: "msg_scripted", type: "message", role: "assistant", model, content: [], stop_reason: null, usage: { input_tokens: 0, output_tokens: 0 } }
+  })
+const stop = (reason: string, tokens: number) =>
+  frame("message_delta", { type: "message_delta", delta: { stop_reason: reason }, usage: { output_tokens: tokens } }) +
+  frame("message_stop", { type: "message_stop" })
+
 const messageStream = (text: string, model: string) =>
   [
-    frame("message_start", {
-      type: "message_start",
-      message: { id: "msg_scripted", type: "message", role: "assistant", model, content: [], stop_reason: null, usage: { input_tokens: 0, output_tokens: 0 } }
-    }),
+    start(model),
     frame("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }),
     frame("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } }),
     frame("content_block_stop", { type: "content_block_stop", index: 0 }),
-    frame("message_delta", { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: text.split(" ").length } }),
-    frame("message_stop", { type: "message_stop" })
+    stop("end_turn", text.split(" ").length)
   ].join("")
+
+/** One call of OpenCode's `shell` tool. */
+const shellStream = (command: string, model: string) =>
+  [
+    start(model),
+    frame("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_scripted", name: "shell", input: {} } }),
+    frame("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: JSON.stringify({ command }) } }),
+    frame("content_block_stop", { type: "content_block_stop", index: 0 }),
+    stop("tool_use", 10)
+  ].join("")
+
+/** What the scripted model says next: run the task's command first, then report it. */
+const scriptedTurn = (body: unknown, model: string): string => {
+  const command = scriptedCommand(body)
+  const output = toolResults(body)
+  if (command !== undefined && output === undefined) return shellStream(command, model)
+  if (command !== undefined && output !== undefined) return messageStream(`Ran \`${command}\`:\n${output.trim()}`, model)
+  return messageStream(scriptedReply(body), model)
+}
 
 /** Answers one Messages API request with the scripted reply (whatever host it was sent to). */
 export const scriptedMessages = async (request: Request): Promise<Response> => {
@@ -63,7 +103,7 @@ export const scriptedMessages = async (request: Request): Promise<Response> => {
   }
   const body: unknown = await request.json()
   const model = typeof body === "object" && body !== null && "model" in body && typeof body.model === "string" ? body.model : "bb-scripted"
-  return new Response(messageStream(scriptedReply(body), model), { headers: { "content-type": "text/event-stream" } })
+  return new Response(scriptedTurn(body, model), { headers: { "content-type": "text/event-stream" } })
 }
 
 /**

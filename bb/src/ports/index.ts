@@ -122,3 +122,48 @@ export class CellDirectory extends Context.Service<
   CellDirectory,
   { readonly cell: (taskId: string) => CellClient }
 >()("bb/CellDirectory") {}
+
+export class SandboxError extends Data.TaggedError("SandboxError")<{ readonly reason: string; readonly retryable: boolean }> {}
+
+export interface WorkspaceSpec {
+  /** One workspace per conversation: the same key across a session's runs. */
+  readonly key: string
+  readonly repos: ReadonlyArray<{ readonly url: string; readonly ref?: string | undefined }>
+}
+
+export interface ExecRequest {
+  readonly argv: ReadonlyArray<string>
+  /** Absolute, inside the sandbox. Defaults to the workspace root. */
+  readonly cwd?: string | undefined
+  readonly env?: Readonly<Record<string, string>> | undefined
+  readonly stdin?: Uint8Array | undefined
+  readonly timeoutMs?: number | undefined
+}
+
+export interface ExecResult {
+  readonly exitCode: number
+  readonly stdout: Uint8Array
+  readonly stderr: Uint8Array
+}
+
+/**
+ * Where the agent's work happens. Opening a workspace clones its repositories into
+ * bb's own copy, claims an isolated sandbox (agent-sandbox in Kubernetes) and copies
+ * the tree in; every agent operation then runs in the sandbox, and `sync` copies the
+ * sandbox's changes back into bb's copy. Idempotent per key throughout.
+ */
+export class Sandboxes extends Context.Service<
+  Sandboxes,
+  {
+    /** Returns the workspace root inside the sandbox (where the repositories are). */
+    readonly open: (spec: WorkspaceSpec) => Effect.Effect<{ readonly root: string }, SandboxError>
+    readonly exec: (key: string, request: ExecRequest) => Effect.Effect<ExecResult, SandboxError>
+    /** `undefined` when the file does not exist. */
+    readonly readFile: (key: string, path: string) => Effect.Effect<Uint8Array | undefined, SandboxError>
+    readonly writeFile: (key: string, path: string, bytes: Uint8Array) => Effect.Effect<void, SandboxError>
+    /** Copies the sandbox's changes back into bb's copy; returns the changed paths (relative to the root). */
+    readonly sync: (key: string) => Effect.Effect<{ readonly changed: ReadonlyArray<string> }, SandboxError>
+    /** Gives the sandbox back. bb's copy stays, so a later `open` continues from it. */
+    readonly release: (key: string) => Effect.Effect<void, SandboxError>
+  }
+>()("bb/Sandboxes") {}

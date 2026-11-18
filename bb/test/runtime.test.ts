@@ -1,7 +1,8 @@
-import { Effect } from "effect"
+import { Effect, Stream } from "effect"
 import { afterAll, describe, expect, it } from "vitest"
 import { defaultScript, makeScriptedRuntime } from "../src/adapters/fake/runtime.ts"
 import { serveRuntime, sessionCellRuntime } from "../src/adapters/durable-object/session-runtime.ts"
+import * as Id from "../src/adapters/opencode/ids.ts"
 import { makeOpenCodeRuntime } from "../src/adapters/opencode/runtime.ts"
 import { defaultSessionId } from "../src/app/cell.ts"
 import { makeOpenCodeHost } from "./opencode-host.ts"
@@ -57,11 +58,12 @@ describe("OpenCode runtime", () => {
     const again = await run(runtime.start({ runId: "o-idem", sessionId: session, request: request("o-idem") }))
     await new Promise((r) => setTimeout(r, 1500))
     const executions = async () => {
-      let n = 0
-      for await (const item of host.host.experimental.session.log({ sessionID: session, after: 0, follow: false })) {
-        if (item.type === "session.execution.started") n++
-      }
-      return n
+      const items = await run(
+        Effect.all([Id.sessionID(session), Id.seq(0)]).pipe(
+          Effect.flatMap(([sessionID, after]) => Stream.runCollect(host.host.experimental.session.log({ sessionID, after, follow: false })))
+        )
+      )
+      return items.filter((item) => item.type === "session.execution.started").length
     }
     expect(await executions()).toBe(1)
     // ...and the restarted cursor still reports this run's own result.

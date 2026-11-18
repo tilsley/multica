@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers"
-import { Context, Effect, Exit, Result } from "effect"
+import { Context, Effect, Exit, Result, Scope } from "effect"
 import * as cell from "../app/cell.ts"
 import { CellSettings } from "../app/cell.ts"
 import { FrontSettings, makeHandler } from "../app/http.ts"
@@ -10,10 +10,12 @@ import { durableDirectory, type Outcome, type TaskCellRpc } from "../adapters/du
 import { serveRuntime, type SessionCellRpc, sessionCellRuntime } from "../adapters/durable-object/session-runtime.ts"
 import type { DurableObjectNamespace, DurableObjectState } from "../adapters/durable-object/types.ts"
 import { defaultScript, makeScriptedRuntime } from "../adapters/fake/runtime.ts"
+import { makeGatewaySandboxes } from "../adapters/gateway/client.ts"
 import { makeOpenCodeRuntime } from "../adapters/opencode/runtime.ts"
+import { providerName, sandboxWorkspaceProvider } from "../adapters/opencode/workspace.ts"
 import { makePostgresMailbox } from "../adapters/postgres/mailbox.ts"
 import { modelSetup } from "../adapters/model/index.ts"
-import { OpenCodeWorkerd } from "@opencode/sdk/workerd"
+import { OpenCodeWorkerd } from "@opencode/sdk/workerd/effect"
 import { adminState, brokenBody, cutAfter, decodeTestConfig, scriptOf } from "../adapters/testkit/faults.ts"
 import { AgentRuntime, CellDirectory, type CellError, CellStore, Mailbox, Scheduler } from "../ports/index.ts"
 
@@ -40,6 +42,14 @@ export interface Env {
   readonly ANTHROPIC_API_KEY?: string
   readonly BB_CLAUDE_MODEL?: string
   readonly ANTHROPIC_BASE_URL?: string
+  /**
+   * "none" (default): OpenCode's tools have no machine (the scripted model needs
+   * none). "gateway": every session runs in a sandbox through the gateway sidecar.
+   */
+  readonly BB_SANDBOX?: string
+  /** Default http://127.0.0.1:8090 (the sidecar in the same pod). */
+  readonly BB_GATEWAY_URL?: string
+  readonly BB_GATEWAY_TOKEN?: string
   /** The Postgres mailbox. Without it, the control cell keeps the index (celld dev). */
   readonly DATABASE_URL?: string
 }
@@ -146,11 +156,30 @@ export class SessionCell extends DurableObject<Env> implements SessionCellRpc {
       return
     }
     const model = setup.success
+    const sandboxes =
+      env.BB_SANDBOX === "gateway"
+        ? makeGatewaySandboxes({ url: env.BB_GATEWAY_URL || "http://127.0.0.1:8090", token: env.BB_GATEWAY_TOKEN ?? "", fetch: (input, init) => fetch(input, init) })
+        : undefined
+    // The host lives as long as the cell: its scope is never closed (eviction ends the isolate).
     const host = state.blockConcurrencyWhile(() =>
-      OpenCodeWorkerd.create({ storage: state.storage, config: { providers: model.providers, model: model.model }, fetch: model.fetch })
+      Effect.runPromise(
+        Scope.make().pipe(
+          Effect.flatMap((scope) =>
+            Scope.provide(
+              OpenCodeWorkerd.create({
+                storage: state.storage,
+                config: { providers: model.providers, model: model.model },
+                fetch: model.fetch,
+                ...(sandboxes ? { workspaceProviders: { [providerName]: sandboxWorkspaceProvider(sandboxes) } } : {})
+              }),
+              scope
+            )
+          )
+        )
+      )
     )
     this.impl = serveRuntime(
-      makeOpenCodeRuntime({ host: () => host, model: model.ref, directory: "/workspace", heartbeatEveryMs: 15_000 })
+      makeOpenCodeRuntime({ host: () => host, model: model.ref, directory: "/workspace", heartbeatEveryMs: 15_000, sandboxes })
     )
   }
   start(...a: Parameters<SessionCellRpc["start"]>) { return this.impl.start(...a) }
