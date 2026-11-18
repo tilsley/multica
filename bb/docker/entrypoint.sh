@@ -52,6 +52,15 @@ JSON
   done
 fi
 
+# Wait until the bucket answers before starting: celld exits if the bucket is
+# unreachable at start, which shows up as restarts while MinIO is still booting.
+i=0
+# shellcheck disable=SC2086
+until celld diagnose --bucket "$CELLD_BUCKET" $endpoint_flag --region "$region" --read-only >/dev/null 2>&1; do
+  i=$((i + 1)); [ "$i" -ge 60 ] && break
+  sleep 2
+done
+
 advertise_flags=""
 if [ -n "${BB_ADVERTISE:-}" ]; then
   advertise_flags="--internal-listen 0.0.0.0:8081 --advertise $BB_ADVERTISE"
