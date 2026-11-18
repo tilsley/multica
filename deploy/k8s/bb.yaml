@@ -32,6 +32,8 @@ spec:
             - { name: BB_TEST_ADMIN, value: "1" }   # dev cluster: drills + mock-bb /admin API. Remove in production.
             - { name: BB_TICK_MS, value: "500" }
             - { name: BB_AGENT, value: opencode }    # OpenCode in a session cell per conversation
+            - { name: BB_SANDBOX, value: gateway }    # every session's tools run in an agent-sandbox sandbox
+            - { name: BB_GATEWAY_URL, value: "http://bb-gateway:8090" }
             # An isolate running OpenCode needs far more heap than celld's default.
             - { name: CELLD_V8_HEAP_LIMIT_MB, value: "1024" }
           envFrom:

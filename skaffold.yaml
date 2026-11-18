@@ -1,6 +1,7 @@
 # Everything on a local kind cluster: stock Multica (official Helm chart, GHCR
-# images), our daemon (bb backend), and bb as a two-node celld fleet with MinIO
-# and Postgres.
+# images), our daemon (bb backend), bb as a two-node celld fleet with MinIO and
+# Postgres, the sandbox gateway, and agent-sandbox (controller + a warm pool of
+# sandboxes the agent works in).
 #
 #   kind create cluster --name bb --config deploy/kind/cluster.yaml
 #   skaffold dev            # build, deploy, stream logs, port-forward
@@ -28,6 +29,15 @@ build:
       context: bb
       docker:
         dockerfile: Dockerfile
+    - image: bb-gateway
+      context: bb
+      docker:
+        dockerfile: Dockerfile
+        target: gateway
+    - image: bb-sandbox
+      context: deploy/sandbox
+      docker:
+        dockerfile: Dockerfile
 
 manifests:
   rawYaml:
@@ -35,10 +45,32 @@ manifests:
     - deploy/k8s/minio.yaml
     - deploy/k8s/bb-postgres.yaml
     - deploy/k8s/bb.yaml
+    - deploy/k8s/bb-gateway.yaml
+    - deploy/k8s/sandbox.yaml
     - deploy/k8s/daemon.yaml
 
+# skaffold sets image tags only in known kinds unless told: the sandbox image is
+# inside agent-sandbox's SandboxTemplate.
+resourceSelector:
+  allow:
+    - groupKind: SandboxTemplate.extensions.agents.x-k8s.io
+      image: [".*"]
+
 deploy:
-  kubectl: {}
+  kubectl:
+    hooks:
+      before:
+        # agent-sandbox (pinned, vendored) first: its CRDs must exist before
+        # deploy/k8s/sandbox.yaml applies.
+        - host:
+            command:
+              - sh
+              - -c
+              - >-
+                kubectl --context "${SKAFFOLD_KUBE_CONTEXT:-kind-bb}" apply --server-side -f deploy/k8s/vendor/agent-sandbox-v1.0.9.yaml &&
+                kubectl --context "${SKAFFOLD_KUBE_CONTEXT:-kind-bb}" wait --for condition=established --timeout=120s
+                crd/sandboxes.agents.x-k8s.io crd/sandboxclaims.extensions.agents.x-k8s.io
+                crd/sandboxtemplates.extensions.agents.x-k8s.io crd/sandboxwarmpools.extensions.agents.x-k8s.io
   helm:
     releases:
       - name: multica

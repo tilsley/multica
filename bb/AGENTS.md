@@ -6,7 +6,7 @@ bb runs coding tasks for the Multica daemon: OpenCode inside celld Durable Objec
 `bun run verify` passes: typecheck (with Effect language-service diagnostics), oxlint (layer boundaries), knip, tests. Never weaken a check to get green.
 
 ## Layers (lint-enforced)
-`src/domain` (pure, `effect` only) ← `src/ports` (Effect services) ← `src/app` (use cases, HTTP) ← `src/adapters/*` ← `src/worker` / `src/dev` (composition roots). Use cases never import adapters. Every external system is a port with a fake first; real adapters pass the same tests.
+`src/domain` (pure, `effect` only) ← `src/ports` (Effect services) ← `src/app` (use cases, HTTP) ← `src/adapters/*` ← `src/worker` (celld) / `src/gateway` (the sandbox gateway, Bun) (composition roots). Use cases never import adapters. Every external system is a port with a fake first; real adapters pass the same tests.
 
 ## Effect
 Effect v4 (`effect@4.1.4`). v3 APIs are wrong here. See `/home/user/campaign-manager/.claude/skills/effect-v4` conventions: `Context.Service`, `Result` in pure code, tagged errors with `reason`, no ambient clock (use `Clock`).

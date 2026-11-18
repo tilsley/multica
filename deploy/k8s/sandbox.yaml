@@ -1,0 +1,40 @@
+# The sandboxes bb's agent works in (kubernetes-sigs/agent-sandbox, installed by
+# skaffold's deploy hook from deploy/k8s/vendor). The gateway claims one per
+# conversation from the warm pool and gives it back when the workspace is done.
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxTemplate
+metadata:
+  name: bb-sandbox
+spec:
+  # Dev cluster: agent-sandbox's managed policy admits only its own router, and
+  # the gateway talks to sandboxd directly. Production: Managed, with an ingress
+  # rule for the gateway's pods and egress limited to what the agent needs.
+  networkPolicyManagement: Unmanaged
+  podTemplate:
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: OnFailure
+      securityContext: { runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000 }
+      containers:
+        - name: sandboxd
+          image: bb-sandbox
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+          ports: [{ containerPort: 8080 }, { containerPort: 9090 }]
+          readinessProbe:
+            httpGet: { path: /v1/health, port: 8080 }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 2Gi }
+          volumeMounts: [{ name: workspace, mountPath: /workspace }]
+      volumes:
+        - name: workspace
+          emptyDir: {}
+---
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxWarmPool
+metadata:
+  name: bb-sandbox
+spec:
+  replicas: 1
+  updateStrategy: { type: Recreate }
+  sandboxTemplateRef: { name: bb-sandbox }

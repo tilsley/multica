@@ -56,6 +56,17 @@ A reply in Multica is a *new task* carrying the previous session id. It resolves
 
 `start` is idempotent because it checks the log for the prompt: OpenCode would run a repeated prompt id again.
 
+## Workspaces and sandboxes
+
+Each conversation (session) has a **workspace**: bb's copy of the issue's repositories, and a **sandbox** the agent works in (`Sandboxes` port). The sandbox is an agent-sandbox SandboxClaim from a warm pool in Kubernetes, and a local directory in tests.
+
+1. `start` opens the workspace (idempotent per key `wrk_<session>`): clone into bb's copy, claim the sandbox, copy the tree in. It registers the workspace with OpenCode, and the session is located in it.
+2. Every tool runs in the sandbox. Commands go through OpenCode's workspace provider (`opencode/workspace.ts`) and the `shell` plugin (`opencode/sandbox-shell.ts`, needed because OpenCode's own shell writes to the host's disk). File reads and writes go to the sandbox's files.
+3. When the run's result arrives, `sync` copies the sandbox's changes back into bb's copy. The changed paths are reported as a `text` event before the result. If the sync fails, the batch is retried and the result is not reported early.
+4. A reply (same session) continues in the same workspace.
+
+The Worker cannot use a disk, git, gRPC or the Kubernetes API, so the **sandbox gateway** (`src/gateway`, its own Deployment) does that work. The Worker reaches it over HTTP (`adapters/gateway/api.ts`). The gateway keeps nothing in memory that it cannot find again in the cluster: claims are named after the workspace key, and a sandbox carries a marker once its tree is in.
+
 ## Models
 
 OpenCode's model is configuration, not code (`BB_MODEL`, `src/adapters/model`):
@@ -74,5 +85,5 @@ Both use OpenCode's Anthropic-compatible provider, and OpenCode's outbound `fetc
 | Domain (this file) | `src/domain` | `effect` only |
 | Ports (Effect services) | `src/ports` | domain, `effect` |
 | Use cases + HTTP handlers | `src/app` | ports, domain |
-| Adapters (fake, Durable Object incl. session cells, Postgres, OpenCode, scripted model; Claude and agent-sandbox next) | `src/adapters/*` | anything |
-| Composition roots | `src/worker` (celld), `src/dev` | anything |
+| Adapters (fake, Durable Object incl. session cells, Postgres, OpenCode, model, scripted model, sandbox: local and agent-sandbox, gateway client and server) | `src/adapters/*` | anything |
+| Composition roots | `src/worker` (celld), `src/gateway` (the sandbox gateway, Bun) | anything |

@@ -1,0 +1,81 @@
+# The sandbox gateway: bb's hands. The bb Worker (in celld) cannot use a disk,
+# git, gRPC or the Kubernetes API, so it asks the gateway to clone repositories
+# into bb's copy, claim agent-sandbox sandboxes, run the agent's commands there
+# and copy the changes back (bb/src/gateway, bb/src/adapters/gateway/api.ts).
+# One replica with a volume: bb's copies live in one place.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bb-gateway
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bb-gateway
+rules:
+  - apiGroups: [extensions.agents.x-k8s.io]
+    resources: [sandboxclaims]
+    verbs: [get, list, watch, create, delete]
+  - apiGroups: [agents.x-k8s.io]
+    resources: [sandboxes]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bb-gateway
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: bb-gateway }
+subjects: [{ kind: ServiceAccount, name: bb-gateway }]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bb-gateway
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 2Gi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bb-gateway
+  labels: { app.kubernetes.io/name: bb-gateway }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }   # one writer of bb's copies
+  selector:
+    matchLabels: { app.kubernetes.io/name: bb-gateway }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: bb-gateway }
+    spec:
+      serviceAccountName: bb-gateway
+      securityContext: { runAsNonRoot: true, runAsUser: 1000, fsGroup: 1000 }
+      containers:
+        - name: gateway
+          image: bb-gateway
+          env:
+            - name: BB_GATEWAY_TOKEN
+              valueFrom: { secretKeyRef: { name: bb-secrets, key: BB_GATEWAY_TOKEN } }
+            - { name: BB_SANDBOX_BACKEND, value: agent-sandbox }
+            - { name: BB_SANDBOX_WARM_POOL, value: bb-sandbox }
+            - { name: BB_GATEWAY_LOG, value: "1" }
+          ports: [{ containerPort: 8090, name: http }]
+          readinessProbe:
+            httpGet: { path: /health, port: 8090 }
+            periodSeconds: 3
+          volumeMounts: [{ name: copies, mountPath: /var/lib/bb-gateway }]
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 1Gi }
+      volumes:
+        - name: copies
+          persistentVolumeClaim: { claimName: bb-gateway }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bb-gateway
+spec:
+  selector: { app.kubernetes.io/name: bb-gateway }
+  ports: [{ name: http, port: 8090, targetPort: 8090 }]

@@ -2,6 +2,7 @@
 #
 # bb: a celld node with the bb Worker project baked in.
 #   docker build -t bb ./bb
+#   docker build -t bb-gateway --target gateway ./bb   (the sandbox gateway)
 # The same image runs every node of the fleet; pod 0 (BB_DEPLOY=1) publishes the
 # deployment to the fleet bucket before it starts serving.
 
@@ -27,7 +28,24 @@ RUN --mount=type=secret,id=extra_ca,required=false \
     if [ -s /run/secrets/extra_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/extra_ca; fi; \
     bun install --production --frozen-lockfile --ignore-scripts
 
-# --- runtime ----------------------------------------------------------------
+# --- gateway: the sandbox gateway (docker build --target gateway) -------------
+# Clones repositories (git), packs and unpacks trees (tar) and talks to the
+# Kubernetes API and sandboxes for the Worker. Same sources and dependencies.
+FROM ${BUN_IMAGE} AS gateway
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git ca-certificates tar \
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /var/lib/bb-gateway && chown bun:bun /var/lib/bb-gateway
+WORKDIR /app
+COPY --from=deps --chown=bun:bun /src/node_modules /app/node_modules
+COPY --chown=bun:bun package.json tsconfig.json /app/
+COPY --chown=bun:bun src /app/src
+USER bun
+ENV BB_GATEWAY_DIR=/var/lib/bb-gateway
+EXPOSE 8090
+ENTRYPOINT ["bun", "src/gateway/main.ts"]
+
+# --- runtime (default target): a celld node --------------------------------
 FROM ${RUNTIME_IMAGE}
 # Both pinned binaries come in; the target architecture's is kept. (A stage named
 # by ${TARGETARCH} would be neater, but skaffold's Dockerfile parser rejects it.)
