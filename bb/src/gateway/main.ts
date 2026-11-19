@@ -52,7 +52,12 @@ const agentSandbox = (): Sandboxes["Service"] => {
 const sandboxes = backend === "agent-sandbox" ? agentSandbox() : backend === "local" ? makeLocalSandboxes(base) : undefined
 if (!sandboxes) throw new Error(`unknown BB_SANDBOX_BACKEND "${backend}" (agent-sandbox | local)`)
 
-const port = Number(env.BB_GATEWAY_PORT || 8090)
+// Kubernetes "service links" set BB_GATEWAY_PORT=tcp://… in pods when a Service is
+// named bb-gateway (deploy/k8s/bb-gateway.yaml turns them off); refuse anything
+// but a number rather than listen on NaN.
+const portSetting = env.BB_GATEWAY_PORT || "8090"
+if (!/^\d+$/.test(portSetting)) throw new Error(`BB_GATEWAY_PORT must be a port number, got "${portSetting}"`)
+const port = Number(portSetting)
 const handler = makeGatewayHandler(sandboxes, token)
 const logged = async (request: Request) => {
   const started = performance.now()
