@@ -137,6 +137,21 @@ export interface OpenedWorkspace {
   readonly repos: ReadonlyArray<{ readonly url: string; readonly path: string }>
 }
 
+export interface PublishRequest {
+  readonly title: string
+  readonly body: string
+  readonly draft: boolean
+}
+
+export interface PublishedRepo {
+  readonly repo: string
+  readonly branch: string
+  /** The pull request, when the repository is on GitHub and a token is configured. */
+  readonly pullRequest?: string | undefined
+  /** Whether this publish opened the pull request (false: it was already open). */
+  readonly created?: boolean | undefined
+}
+
 export interface ExecRequest {
   readonly argv: ReadonlyArray<string>
   /** Absolute, inside the sandbox. Defaults to the workspace root. */
@@ -169,6 +184,11 @@ export class Sandboxes extends Context.Service<
     readonly writeFile: (key: string, path: string, bytes: Uint8Array) => Effect.Effect<void, SandboxError>
     /** Copies the sandbox's changes back into bb's copy; returns the changed paths (relative to the root). */
     readonly sync: (key: string) => Effect.Effect<{ readonly changed: ReadonlyArray<string> }, SandboxError>
+    /**
+     * Commits bb's copy's changes (what `sync` brought back) to the workspace's branch,
+     * pushes it and opens a pull request, per repository with changes.
+     */
+    readonly publish: (key: string, request: PublishRequest) => Effect.Effect<ReadonlyArray<PublishedRepo>, SandboxError>
     /** Gives the sandbox back. bb's copy stays, so a later `open` continues from it. */
     readonly release: (key: string) => Effect.Effect<void, SandboxError>
   }

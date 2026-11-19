@@ -50,6 +50,8 @@ export interface Env {
   /** Default http://127.0.0.1:8090 (the sidecar in the same pod). */
   readonly BB_GATEWAY_URL?: string
   readonly BB_GATEWAY_TOKEN?: string
+  /** After a run that changed files: "none" (default), "draft-pr" or "pr" (needs the gateway's GitHub token). */
+  readonly BB_PUBLISH?: string
   /** OpenCode's own log level ("debug", "info", "warn"…), forwarded to bb's log. Default: off. */
   readonly BB_OPENCODE_LOG?: string
   /** The Postgres mailbox. Without it, the control cell keeps the index (celld dev). */
@@ -196,7 +198,14 @@ export class SessionCell extends DurableObject<Env> implements SessionCellRpc {
       )
     )
     this.impl = serveRuntime(
-      makeOpenCodeRuntime({ host: () => host, model: model.ref, directory: "/workspace", heartbeatEveryMs: 15_000, sandboxes })
+      makeOpenCodeRuntime({
+        host: () => host,
+        model: model.ref,
+        directory: "/workspace",
+        heartbeatEveryMs: 15_000,
+        sandboxes,
+        publish: env.BB_PUBLISH === "pr" ? { draft: false } : env.BB_PUBLISH === "draft-pr" ? { draft: true } : undefined
+      })
     )
   }
   start(...a: Parameters<SessionCellRpc["start"]>) { return this.impl.start(...a) }

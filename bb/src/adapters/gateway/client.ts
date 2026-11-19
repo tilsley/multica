@@ -67,6 +67,10 @@ export const makeGatewaySandboxes = (options: GatewayClientOptions): Sandboxes["
     writeFile: (key, path, data) =>
       call("POST", key, "/write", { schema: Api.WriteRequest, value: { path, data } }, Api.Empty).pipe(Effect.asVoid),
     sync: (key) => call("POST", key, "/sync", undefined, Api.SyncResponse),
+    publish: (key, request) =>
+      call("POST", key, "/publish", { schema: Api.PublishRequest, value: request }, Api.PublishResponse).pipe(
+        Effect.map((r) => r.published)
+      ),
     release: (key) => call("DELETE", key, "", undefined, Api.Empty).pipe(Effect.asVoid)
   }
 }

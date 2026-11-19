@@ -85,6 +85,27 @@ export const sandboxesContract = (name: string, make: () => Promise<Sandboxes["S
       expect(await run(sandboxes.readFile(key, `${repo2}/lost.txt`))).toBeUndefined()
     })
 
+    it("publish commits bb's copy to the workspace's branch and pushes it; nothing to publish when nothing changed", async () => {
+      const { sandboxes, key, repo, origin } = await fresh()
+      const request = { title: "Add notes", body: "Summary", draft: true }
+      expect(await run(sandboxes.publish(key, request))).toEqual([])
+      await run(sandboxes.writeFile(key, `${repo}/notes.md`, bytes("first")))
+      await run(sandboxes.sync(key))
+      const [published] = await run(sandboxes.publish(key, request))
+      expect(published?.repo).toBe(origin)
+      expect(published?.branch).toMatch(/^bb\//)
+      const branch = published?.branch ?? ""
+      const show = (path: string) => execFileSync("git", ["show", `${branch}:${path}`], { cwd: origin }).toString()
+      expect(show("notes.md")).toBe("first")
+      expect(execFileSync("git", ["log", "-1", "--format=%s", branch], { cwd: origin }).toString().trim()).toBe("Add notes")
+      // Published work is not published again; new work is a new commit on the same branch.
+      expect(await run(sandboxes.publish(key, request))).toEqual([])
+      await run(sandboxes.writeFile(key, `${repo}/notes.md`, bytes("second")))
+      await run(sandboxes.sync(key))
+      expect((await run(sandboxes.publish(key, request)))[0]?.branch).toBe(branch)
+      expect(show("notes.md")).toBe("second")
+    })
+
     it("using a workspace that is not open fails", async () => {
       const sandboxes = await make()
       const exit = await Effect.runPromiseExit(sandboxes.exec("wrk_never_opened", { argv: ["true"] }))

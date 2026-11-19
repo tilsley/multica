@@ -8,7 +8,7 @@ import * as Api from "./api.ts"
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
 const failure = (e: SandboxError) => json(e.retryable ? 503 : 422, { error: e.reason, retryable: e.retryable })
 
-const route = /^\/v1\/workspaces\/([^/]+)(\/(exec|read|write|sync))?$/
+const route = /^\/v1\/workspaces\/([^/]+)(\/(exec|read|write|sync|publish))?$/
 
 const respond = <A, I, IE, O, OE>(
   request: Request,
@@ -53,6 +53,21 @@ export const makeGatewayHandler = (sandboxes: Sandboxes["Service"], token: strin
       return respond(request, Api.ReadRequest, (v) => sandboxes.readFile(key, v.path), Api.ReadResponse, (data) => (data === undefined ? {} : { data }))
     if (action === "write" && m === "POST") return respond(request, Api.WriteRequest, (v) => sandboxes.writeFile(key, v.path, v.data), Api.Empty, () => ({}))
     if (action === "sync" && m === "POST") return respond(request, Api.Empty, () => sandboxes.sync(key), Api.SyncResponse, (r) => r)
+    if (action === "publish" && m === "POST")
+      return respond(
+        request,
+        Api.PublishRequest,
+        (v) => sandboxes.publish(key, v),
+        Api.PublishResponse,
+        (published) => ({
+          published: published.map((p) => ({
+            repo: p.repo,
+            branch: p.branch,
+            ...(p.pullRequest === undefined ? {} : { pullRequest: p.pullRequest }),
+            ...(p.created === undefined ? {} : { created: p.created })
+          }))
+        })
+      )
     return json(405, { error: "method not allowed", retryable: false })
   }
 }

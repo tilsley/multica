@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process"
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -37,6 +38,19 @@ describe("OpenCode in a sandbox", () => {
     await run(sandboxes.release(key))
     const { root } = await run(sandboxes.open({ key, repos: [{ url: origin }] }))
     expect(new TextDecoder().decode(await run(sandboxes.readFile(key, `${root}/${repo}/hello.txt`)))).toBe("hello\n")
+  })
+
+  it("publishes a run's changes when asked: the workspace's branch is pushed", async () => {
+    const host = await hostP
+    const origin = makeOrigin()
+    const repo = origin.split("/").at(-1) ?? ""
+    const runtime = makeOpenCodeRuntime({ host: async () => host.host, model: host.ref, directory: host.dir, heartbeatEveryMs: 50, sandboxes, publish: { draft: true } })
+    const task = { ...request("s-pub", `Add a file\nrun: echo hi > ${repo}/published.txt`), repos: [{ url: origin }] }
+    const { events } = await drive(runtime, "s-pub", await run(runtime.start({ runId: "s-pub", sessionId: defaultSessionId("s-pub"), request: task })))
+    expect(events.at(-1)).toMatchObject({ kind: "result", status: "succeeded" })
+    const pushed = events.find((e) => e.kind === "text" && e.text.startsWith("Pushed branch "))
+    expect(pushed).toEqual({ kind: "text", text: `Pushed branch bb/bb_s-pub to ${origin}` })
+    expect(execFileSync("git", ["show", "bb/bb_s-pub:published.txt"], { cwd: origin }).toString()).toBe("hi\n")
   })
 
   it("tells the agent where its repositories are", async () => {

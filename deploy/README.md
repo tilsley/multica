@@ -28,6 +28,19 @@ kubectl --context kind-bb get sandboxwarmpools,sandboxclaims,sandboxes
 kubectl --context kind-bb logs deploy/bb-gateway
 ```
 
+### GitHub: private repositories and pull requests
+
+Give the gateway a GitHub token, and runs that change files push a branch `bb/<conversation>` and open a **draft** pull request (later runs in the same conversation add commits to it). Use a fine-grained personal access token limited to the repositories bb should touch, with **Contents: read and write** and **Pull requests: read and write** (Metadata: read comes with them).
+
+```bash
+kubectl --context kind-bb create secret generic bb-github --from-literal=GITHUB_TOKEN=...
+kubectl --context kind-bb rollout restart deployment/bb-gateway
+```
+
+The token stays in the gateway: the Worker and the sandbox never see it, and it is passed to git per command (never written into a remote URL or `.git/config`). Without a token, public repositories still clone and runs report `Could not publish the changes: …`. `BB_PUBLISH` on bb (`none`, `draft-pr`, `pr`) chooses what happens after a run; kind uses `draft-pr`.
+
+Idle sandboxes are given back after 30 minutes (`BB_SANDBOX_IDLE_MINUTES` on the gateway), after their work is copied to bb's copy; the next run in that conversation claims a new one from it.
+
 ### Using Claude
 
 ```bash

@@ -64,7 +64,9 @@ Each conversation (session) has a **workspace**: bb's copy of the issue's reposi
 2. Every tool runs in the sandbox. OpenCode's workspace provider (`opencode/workspace.ts`) sends its processes and file reads and writes there. A plugin (`opencode/sandbox-tools.ts`) replaces how three tools run, keeping their names and schemas: `shell`, because OpenCode's own writes command output to the host's disk; and `glob` and `grep`, because OpenCode's own look for `rg` on the host. They use the sandbox's own `rg`.
    The brief tells the agent where each repository is (`Sandboxes.open` returns the paths).
 3. When the run's result arrives, `sync` copies the sandbox's changes back into bb's copy. The changed paths are reported as a `text` event before the result. If the sync fails, the batch is retried and the result is not reported early.
-4. A reply (same session) continues in the same workspace.
+4. With publishing on (`BB_PUBLISH`), a run with changes then commits bb's copy to the conversation's branch `bb/<key>`, pushes it, and opens a pull request (draft by default), or adds the commit to the one already open. The PR link is reported as a `text` event. A failed publish is reported and never fails the run: the work is safe in bb's copy, and the next run with changes publishes it. Credentials stay in the gateway.
+5. A reply (same session) continues in the same workspace.
+6. An idle workspace's sandbox is given back (after `sync`) by the gateway (`sandbox/idle.ts`). Using the workspace again opens it again from bb's copy, transparently.
 
 The Worker cannot use a disk, git, gRPC or the Kubernetes API, so the **sandbox gateway** (`src/gateway`, its own Deployment) does that work. The Worker reaches it over HTTP (`adapters/gateway/api.ts`). The gateway keeps nothing in memory that it cannot find again in the cluster: claims are named after the workspace key, and a sandbox carries a marker once its tree is in.
 

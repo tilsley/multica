@@ -9,7 +9,7 @@
 #   BB_DEPLOY      1 to publish the deployment first (default: pods named *-0)
 #   BB_TOKEN, DATABASE_URL, BB_TEST_ADMIN, BB_TICK_MS, BB_VERSION, BB_AGENT,
 #   BB_MODEL, ANTHROPIC_API_KEY, BB_CLAUDE_MODEL, ANTHROPIC_BASE_URL,
-#   BB_SANDBOX, BB_GATEWAY_URL, BB_GATEWAY_TOKEN, BB_OPENCODE_LOG   Worker vars
+#   BB_SANDBOX, BB_GATEWAY_URL, BB_GATEWAY_TOKEN, BB_OPENCODE_LOG, BB_PUBLISH   Worker vars
 #   (celld has only plain vars: a key set here is stored in the fleet bucket. Fine
 #   for kind; production uses Bedrock through a signing proxy instead.)
 set -eu
@@ -55,6 +55,7 @@ if [ "${BB_DEPLOY:-0}" = "1" ]; then
     "BB_GATEWAY_URL": "$(json_escape "${BB_GATEWAY_URL:-}")",
     "BB_GATEWAY_TOKEN": "$(json_escape "${BB_GATEWAY_TOKEN:-}")",
     "BB_OPENCODE_LOG": "$(json_escape "${BB_OPENCODE_LOG:-}")",
+    "BB_PUBLISH": "$(json_escape "${BB_PUBLISH:-none}")",
     "DATABASE_URL": "$(json_escape "${DATABASE_URL:-}")"
   }
 }

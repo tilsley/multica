@@ -2,7 +2,8 @@ import { cp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, resolve } from "node:path"
 import { Effect } from "effect"
 import { type Sandboxes, SandboxError } from "../../ports/index.ts"
-import { cloneInto, run } from "./git.ts"
+import { cloneInto, defaultGit, type GitSettings, run } from "./git.ts"
+import { publishCopy } from "./publish.ts"
 import { repoDir, syncTree } from "./tree.ts"
 
 // Sandboxes on the local machine: bb's copy in <base>/copies/<key>, the "sandbox"
@@ -22,7 +23,7 @@ const exists = (path: string) => stat(path).then(() => true, () => false)
 
 const attempt = <A>(f: () => Promise<A>, retryable = false) => Effect.tryPromise({ try: f, catch: fail(retryable) })
 
-export const makeLocalSandboxes = (base: string): Sandboxes["Service"] => {
+export const makeLocalSandboxes = (base: string, git: GitSettings = defaultGit): Sandboxes["Service"] => {
   const copy = (key: string) => join(base, "copies", safeKey(key))
   const box = (key: string) => join(base, "sandboxes", safeKey(key))
   const inBox = (key: string, path: string) => {
@@ -38,7 +39,7 @@ export const makeLocalSandboxes = (base: string): Sandboxes["Service"] => {
   return {
     open: (spec) =>
       attempt(async () => {
-        await cloneInto(copy(spec.key), spec)
+        await cloneInto(copy(spec.key), spec, git)
         if (!(await exists(box(spec.key)))) {
           await mkdir(dirname(box(spec.key)), { recursive: true })
           await cp(copy(spec.key), box(spec.key), { recursive: true })
@@ -68,6 +69,7 @@ export const makeLocalSandboxes = (base: string): Sandboxes["Service"] => {
         await opened(key)
         return { changed: await syncTree(box(key), copy(key)) }
       }),
+    publish: (key, request) => attempt(() => publishCopy(copy(key), key, request, git)),
     release: (key) => attempt(() => rm(box(key), { recursive: true, force: true }))
   }
 }

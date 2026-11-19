@@ -34,6 +34,7 @@ spec:
             - { name: BB_AGENT, value: opencode }    # OpenCode in a session cell per conversation
             - { name: BB_SANDBOX, value: gateway }    # every session's tools run in an agent-sandbox sandbox
             - { name: BB_GATEWAY_URL, value: "http://bb-gateway:8090" }
+            - { name: BB_PUBLISH, value: draft-pr }  # runs with changes push bb/<conversation> and open a draft PR (needs the gateway's GitHub token)
             # An isolate running OpenCode needs far more heap than celld's default.
             - { name: CELLD_V8_HEAP_LIMIT_MB, value: "1024" }
           envFrom:

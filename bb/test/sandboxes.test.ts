@@ -6,6 +6,7 @@ import { afterAll, expect, it } from "vitest"
 import { makeGatewaySandboxes } from "../src/adapters/gateway/client.ts"
 import { makeGatewayHandler } from "../src/adapters/gateway/server.ts"
 import { claimName, makeAgentSandboxes } from "../src/adapters/sandbox/agent-sandbox.ts"
+import { defaultGit } from "../src/adapters/sandbox/git.ts"
 import { makeLocalSandboxes } from "../src/adapters/sandbox/local.ts"
 import { makeFakeCluster } from "./fake-agent-sandbox.ts"
 import { sandboxesContract } from "./sandboxes-contract.ts"
@@ -40,7 +41,8 @@ sandboxesContract("agent-sandbox (fake cluster)", async () =>
     sandboxd: { restPort: cluster.restPort, grpcPort: cluster.grpcPort },
     readyTimeoutMs: 5000,
     pollMs: 10,
-    execTimeoutMs: 10_000
+    execTimeoutMs: 10_000,
+    git: defaultGit
   })
 )
 

@@ -37,19 +37,48 @@ export const run = (
 
 const exists = (path: string) => stat(path).then(() => true, () => false)
 
+export type Fetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+
+/** How bb's copies talk to their remotes: credentials and the identity bb commits as. */
+export interface GitSettings {
+  /** A GitHub token (a PAT or an installation token). Used for github.com only. */
+  readonly githubToken?: string | undefined
+  readonly author: { readonly name: string; readonly email: string }
+  /** For GitHub's API. */
+  readonly fetch: Fetch
+}
+
+export const defaultGit: GitSettings = { author: { name: "bb", email: "bb@localhost" }, fetch: (input, init) => fetch(input, init) }
+
+/**
+ * git options that authenticate to github.com for one command. The token goes in
+ * a header for that command only: never into a remote URL or .git/config, which
+ * are copied into the sandbox.
+ */
+export const authArgs = (url: string, git: GitSettings): Array<string> =>
+  git.githubToken && url.startsWith("https://github.com/")
+    ? ["-c", `http.https://github.com/.extraheader=Authorization: Basic ${Buffer.from(`x-access-token:${git.githubToken}`).toString("base64")}`]
+    : []
+
+/** Runs git in a directory and returns stdout; fails with git's stderr. */
+export const git = async (cwd: string, args: ReadonlyArray<string>, timeoutMs = 300_000): Promise<string> => {
+  const r = await run(["git", ...args], { cwd, timeoutMs, env: { GIT_TERMINAL_PROMPT: "0" } })
+  if (r.exitCode !== 0) throw new Error(`git ${args.filter((a) => !a.startsWith("http.")).join(" ")} failed: ${new TextDecoder().decode(r.stderr).trim()}`)
+  return new TextDecoder().decode(r.stdout).trim()
+}
+
 /**
  * bb's copy of a workspace: each repository cloned into `<dir>/<name>`. Idempotent:
  * a repository already cloned is left as it is (it holds earlier runs' changes).
  */
-export const cloneInto = async (dir: string, spec: WorkspaceSpec): Promise<void> => {
+export const cloneInto = async (dir: string, spec: WorkspaceSpec, settings: GitSettings = defaultGit): Promise<void> => {
   await mkdir(dir, { recursive: true })
   await Promise.all(
     spec.repos.map(async (repo) => {
       const target = join(dir, repoDir(repo.url))
       if (await exists(target)) return
       const ref = repo.ref ? ["--branch", repo.ref] : []
-      const r = await run(["git", "clone", "--depth", "50", ...ref, "--", repo.url, target], { cwd: dir, timeoutMs: 300_000 })
-      if (r.exitCode !== 0) throw new Error(`git clone ${repo.url} failed: ${new TextDecoder().decode(r.stderr).trim()}`)
+      await git(dir, [...authArgs(repo.url, settings), "clone", "--depth", "50", ...ref, "--", repo.url, target])
     })
   )
 }

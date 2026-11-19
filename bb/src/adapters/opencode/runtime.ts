@@ -32,6 +32,8 @@ export interface OpenCodeRuntimeOptions {
   readonly heartbeatEveryMs: number
   /** Run every session in a sandbox (the host must register `sandboxWorkspaceProvider`). */
   readonly sandboxes?: Sandboxes["Service"] | undefined
+  /** After a run that changed files: push the workspace's branch and open a pull request. */
+  readonly publish?: { readonly draft: boolean } | undefined
 }
 
 const Cursor = Schema.Struct({
@@ -39,7 +41,9 @@ const Cursor = Schema.Struct({
   beat: Schema.Finite,
   map: MapState,
   /** The sandbox workspace, when the run has one. */
-  workspace: Schema.optionalKey(Schema.String)
+  workspace: Schema.optionalKey(Schema.String),
+  /** The pull request title, when the run publishes. */
+  title: Schema.optionalKey(Schema.String)
 })
 type Cursor = typeof Cursor.Type
 const decodeCursor = Schema.decodeUnknownEffect(Schema.fromJsonString(Cursor))
@@ -80,10 +84,33 @@ const lastSeq = (items: ReadonlyArray<unknown>) => mapLog(items, initialState(0)
 /** After the run: the sandbox's changes go back to bb's copy, and are reported. */
 const finish = (sandboxes: Sandboxes["Service"], key: string) =>
   sandboxes.sync(key).pipe(
-    Effect.map(({ changed }): ReadonlyArray<AgentEvent> =>
-      changed.length === 0 ? [] : [{ kind: "text", text: `Changed in the workspace: ${changed.join(", ")}` }]
-    ),
+    Effect.map(({ changed }) => ({
+      changed,
+      events: changed.length === 0 ? [] : [{ kind: "text" as const, text: `Changed in the workspace: ${changed.join(", ")}` }]
+    })),
     Effect.mapError(sandboxError)
+  )
+
+/** The pull request's title: the issue and the first line of the task. */
+export const pullRequestTitle = (request: { readonly prompt: string; readonly taskId: string; readonly issue?: { readonly identifier?: string } | undefined }) => {
+  const first = request.prompt.split("\n").find((l) => l.trim() !== "")?.trim() ?? "Changes from bb"
+  const line = first.length > 72 ? `${first.slice(0, 69)}...` : first
+  return request.issue?.identifier ? `${request.issue.identifier}: ${line}` : line
+}
+
+/**
+ * Publishing never fails the run: the changes are safe in bb's copy, so a failure
+ * is reported and the next run with changes tries again.
+ */
+const publishChanges = (sandboxes: Sandboxes["Service"], key: string, title: string, summary: string, draft: boolean) =>
+  sandboxes.publish(key, { title, body: `${summary}\n\n---\nOpened by bb.`, draft }).pipe(
+    Effect.map((published): ReadonlyArray<AgentEvent> =>
+      published.map((p) => ({
+        kind: "text" as const,
+        text: p.pullRequest ? `Pull request ${p.created ? "opened" : "updated"}: ${p.pullRequest}` : `Pushed branch ${p.branch} to ${p.repo}`
+      }))
+    ),
+    Effect.catch((e) => Effect.succeed<ReadonlyArray<AgentEvent>>([{ kind: "text", text: `Could not publish the changes: ${e.reason}` }]))
   )
 
 export const makeOpenCodeRuntime = (options: OpenCodeRuntimeOptions): AgentRuntime["Service"] => {
@@ -144,7 +171,13 @@ export const makeOpenCodeRuntime = (options: OpenCodeRuntimeOptions): AgentRunti
             oc.sessions.prompt({ sessionID, id: promptId, text: promptText(request.prompt, request.systemPrompt, opened ? workspaceNote(opened) : undefined) })
           )
         }
-        const cursor: Cursor = { sessionId, beat: now, map: initialState(before), ...(workspace ? { workspace } : {}) }
+        const cursor: Cursor = {
+          sessionId,
+          beat: now,
+          map: initialState(before),
+          ...(workspace ? { workspace } : {}),
+          ...(options.publish ? { title: pullRequestTitle(request) } : {})
+        }
         return JSON.stringify(cursor)
       }),
 
@@ -159,8 +192,13 @@ export const makeOpenCodeRuntime = (options: OpenCodeRuntimeOptions): AgentRunti
         if (resultAt >= 0 && options.sandboxes && cursor.workspace) {
           // If the sync fails the whole batch is retried next tick (the cursor does
           // not advance), so the result is never reported before the changes are back.
-          const changes = yield* finish(options.sandboxes, cursor.workspace)
-          events = [...events.slice(0, resultAt), ...changes, ...events.slice(resultAt)]
+          const synced = yield* finish(options.sandboxes, cursor.workspace)
+          const result = events[resultAt]
+          const published =
+            options.publish && cursor.title !== undefined && synced.changed.length > 0
+              ? yield* publishChanges(options.sandboxes, cursor.workspace, cursor.title, result?.kind === "result" ? (result.summary ?? "") : "", options.publish.draft)
+              : []
+          events = [...events.slice(0, resultAt), ...synced.events, ...published, ...events.slice(resultAt)]
         }
         let beat = events.length > 0 ? now : cursor.beat
         if (events.length === 0 && !mapped.state.done && now - cursor.beat >= options.heartbeatEveryMs) {

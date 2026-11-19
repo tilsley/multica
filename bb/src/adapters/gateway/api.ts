@@ -29,6 +29,17 @@ export const ReadRequest = Schema.Struct({ path: Schema.String })
 export const ReadResponse = Schema.Struct({ data: Schema.optionalKey(Schema.Uint8ArrayFromBase64) })
 export const WriteRequest = Schema.Struct({ path: Schema.String, data: Schema.Uint8ArrayFromBase64 })
 export const SyncResponse = Schema.Struct({ changed: Schema.Array(Schema.String) })
+export const PublishRequest = Schema.Struct({ title: Schema.String, body: Schema.String, draft: Schema.Boolean })
+export const PublishResponse = Schema.Struct({
+  published: Schema.Array(
+    Schema.Struct({
+      repo: Schema.String,
+      branch: Schema.String,
+      pullRequest: Schema.optionalKey(Schema.String),
+      created: Schema.optionalKey(Schema.Boolean)
+    })
+  )
+})
 export const Empty = Schema.Struct({})
 export const ErrorBody = Schema.Struct({ error: Schema.String, retryable: Schema.Boolean })
 

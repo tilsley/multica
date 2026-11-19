@@ -4,7 +4,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Effect } from "effect"
 import { type ExecRequest, type Sandboxes, SandboxError } from "../../ports/index.ts"
-import { cloneInto, run } from "./git.ts"
+import { cloneInto, type GitSettings, run } from "./git.ts"
+import { publishCopy } from "./publish.ts"
 import { execute } from "./grpc.ts"
 import { repoDir, syncTree } from "./tree.ts"
 
@@ -35,6 +36,7 @@ export interface AgentSandboxOptions {
   readonly readyTimeoutMs: number
   readonly pollMs: number
   readonly execTimeoutMs: number
+  readonly git: GitSettings
 }
 
 export const sandboxRoot = "/workspace"
@@ -79,7 +81,12 @@ const inRoot = (path: string): string | undefined => {
 const attempt = <A>(f: () => Promise<A>) =>
   Effect.tryPromise({ try: f, catch: (e) => new SandboxError({ reason: message(e), retryable: e instanceof Retryable }) })
 
-export const makeAgentSandboxes = (options: AgentSandboxOptions): Sandboxes["Service"] => {
+export type AgentSandboxes = Sandboxes["Service"] & {
+  /** Workspaces that hold a claim now (bb's claims carry their workspace key). */
+  readonly claimed: () => Promise<ReadonlyArray<string>>
+}
+
+export const makeAgentSandboxes = (options: AgentSandboxOptions): AgentSandboxes => {
   const copy = (key: string) => {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(key)) throw new Error(`bad workspace key: ${key}`)
     return join(options.base, "copies", key)
@@ -177,11 +184,21 @@ export const makeAgentSandboxes = (options: AgentSandboxOptions): Sandboxes["Ser
     }
   }
 
+  const claimed = async (): Promise<ReadonlyArray<string>> => {
+    const r = await kube("GET", `${claimPath()}?labelSelector=${encodeURIComponent("app.kubernetes.io/managed-by=bb")}`)
+    const items = at(r.json, "items")
+    return Array.isArray(items) ? items.flatMap((i) => {
+      const key = at(i, "metadata", "annotations", "bb/workspace")
+      return typeof key === "string" ? [key] : []
+    }) : []
+  }
+
   return {
+    claimed,
     open: (spec) =>
       attempt(async () => {
         const dir = copy(spec.key)
-        await cloneInto(dir, spec)
+        await cloneInto(dir, spec, options.git)
         await address(spec.key, true)
         const ready = await files(spec.key, "HEAD", marker)
         if (ready.status !== 200) {
@@ -233,6 +250,7 @@ export const makeAgentSandboxes = (options: AgentSandboxOptions): Sandboxes["Ser
           await rm(unpacked, { recursive: true, force: true })
         }
       }),
+    publish: (key, request) => attempt(() => publishCopy(copy(key), key, request, options.git)),
     release: (key) =>
       attempt(async () => {
         addresses.delete(key)
