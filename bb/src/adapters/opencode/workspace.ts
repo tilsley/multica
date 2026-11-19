@@ -3,7 +3,7 @@ import { Effect, PlatformError, Sink, Stream } from "effect"
 import type { ChildProcess } from "effect/process"
 import * as Spawner from "effect/process/ChildProcessSpawner"
 import type { Sandboxes } from "../../ports/index.ts"
-import { sandboxShellPlugin } from "./sandbox-shell.ts"
+import { sandboxToolsPlugin } from "./sandbox-tools.ts"
 
 // OpenCode's workspace provider over bb's Sandboxes port: every process OpenCode
 // starts in a session located in this workspace (its shell tool, and the commands
@@ -120,5 +120,5 @@ export const sandboxWorkspaceProvider = (sandboxes: Sandboxes["Service"]): Works
 /** Everything an OpenCode host needs to run sessions in bb's sandboxes. */
 export const sandboxHostOptions = (sandboxes: Sandboxes["Service"]) => ({
   workspaceProviders: { [providerName]: sandboxWorkspaceProvider(sandboxes) },
-  plugins: [sandboxShellPlugin(sandboxes)]
+  plugins: [sandboxToolsPlugin(sandboxes)]
 })

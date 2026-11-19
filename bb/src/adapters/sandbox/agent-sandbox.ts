@@ -6,7 +6,7 @@ import { Effect } from "effect"
 import { type ExecRequest, type Sandboxes, SandboxError } from "../../ports/index.ts"
 import { cloneInto, run } from "./git.ts"
 import { execute } from "./grpc.ts"
-import { syncTree } from "./tree.ts"
+import { repoDir, syncTree } from "./tree.ts"
 
 // Sandboxes on kubernetes-sigs/agent-sandbox. bb's copy of a workspace lives on
 // the gateway's disk (<base>/copies/<key>); the sandbox is a SandboxClaim from a
@@ -192,7 +192,7 @@ export const makeAgentSandboxes = (options: AgentSandboxOptions): Sandboxes["Ser
           const done = await files(spec.key, "PUT", marker, "?parents=true", new TextEncoder().encode("ok"))
           if (!done.ok) throw new Error(`marking the sandbox ready: ${done.status}`)
         }
-        return { root: sandboxRoot }
+        return { root: sandboxRoot, repos: spec.repos.map((r) => ({ url: r.url, path: `${sandboxRoot}/${repoDir(r.url)}` })) }
       }),
     exec: (key, request) => attempt(() => exec(key, request)),
     readFile: (key, path) =>

@@ -7,7 +7,10 @@ import { Schema } from "effect"
 
 export const Repo = Schema.Struct({ url: Schema.String, ref: Schema.optionalKey(Schema.String) })
 export const OpenRequest = Schema.Struct({ repos: Schema.Array(Repo) })
-export const OpenResponse = Schema.Struct({ root: Schema.String })
+export const OpenResponse = Schema.Struct({
+  root: Schema.String,
+  repos: Schema.Array(Schema.Struct({ url: Schema.String, path: Schema.String }))
+})
 
 export const ExecRequest = Schema.Struct({
   argv: Schema.Array(Schema.String),

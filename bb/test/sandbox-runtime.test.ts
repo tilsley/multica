@@ -39,6 +39,40 @@ describe("OpenCode in a sandbox", () => {
     expect(new TextDecoder().decode(await run(sandboxes.readFile(key, `${root}/${repo}/hello.txt`)))).toBe("hello\n")
   })
 
+  it("tells the agent where its repositories are", async () => {
+    const host = await hostP
+    const origin = makeOrigin()
+    const repo = origin.split("/").at(-1) ?? ""
+    const runtime = makeOpenCodeRuntime({ host: async () => host.host, model: host.ref, directory: host.dir, heartbeatEveryMs: 50, sandboxes })
+    const task = { ...request("s-note", "Look around"), repos: [{ url: origin }] }
+    const before = host.modelRequests().length
+    await drive(runtime, "s-note", await run(runtime.start({ runId: "s-note", sessionId: defaultSessionId("s-note"), request: task })))
+    const sent = host.modelRequests().slice(before).join("\n")
+    expect(sent).toContain("The repositories are checked out there:")
+    expect(sent).toContain(`/${repo} (${origin})`)
+  })
+
+  it("glob and grep search the sandbox (with the sandbox's own ripgrep)", async () => {
+    const host = await hostP
+    const origin = makeOrigin()
+    const repo = origin.split("/").at(-1) ?? ""
+    const runtime = makeOpenCodeRuntime({ host: async () => host.host, model: host.ref, directory: host.dir, heartbeatEveryMs: 50, sandboxes })
+    const session = defaultSessionId("s-search")
+    const go = async (runId: string, prompt: string) => {
+      const task = { ...request(runId, prompt), repos: [{ url: origin }] }
+      const { events } = await drive(runtime, runId, await run(runtime.start({ runId, sessionId: session, request: task })))
+      const result = events.at(-1)
+      return result?.kind === "result" ? (result.summary ?? "") : ""
+    }
+    const files = await go("s-glob", "Find text files\nglob: **/*.txt")
+    expect(files).toContain(`/${repo}/app.txt`)
+    expect(files).not.toContain("No files found")
+    const hits = await go("s-grep", "Find the version\ngrep: v1")
+    expect(hits).toContain("Found 1 matches")
+    expect(hits).toContain(`${repo}/app.txt:`)
+    expect(hits).toContain("Line 1: v1")
+  })
+
   it("runs the shell tool through the sandbox itself (bb's plugin): a failing command reports its exit code", async () => {
     const host = await hostP
     const runtime = makeOpenCodeRuntime({ host: async () => host.host, model: host.ref, directory: host.dir, heartbeatEveryMs: 50, sandboxes })

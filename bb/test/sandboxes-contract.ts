@@ -36,9 +36,11 @@ export const sandboxesContract = (name: string, make: () => Promise<Sandboxes["S
       return { sandboxes, key, root, repo, origin }
     }
 
-    it("open clones the repositories into the workspace", async () => {
-      const { sandboxes, key, repo } = await fresh()
+    it("open clones the repositories into the workspace, and says where each one is", async () => {
+      const { sandboxes, key, repo, origin } = await fresh()
       expect(text(await run(sandboxes.readFile(key, `${repo}/app.txt`)))).toBe("v1\n")
+      const again = await run(sandboxes.open({ key, repos: [{ url: origin }] }))
+      expect(again.repos).toEqual([{ url: origin, path: repo }])
     })
 
     it("exec runs in the sandbox: cwd, env, stdin and the exit code", async () => {

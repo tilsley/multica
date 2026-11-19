@@ -3,7 +3,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path"
 import { Effect } from "effect"
 import { type Sandboxes, SandboxError } from "../../ports/index.ts"
 import { cloneInto, run } from "./git.ts"
-import { syncTree } from "./tree.ts"
+import { repoDir, syncTree } from "./tree.ts"
 
 // Sandboxes on the local machine: bb's copy in <base>/copies/<key>, the "sandbox"
 // a separate directory, <base>/sandboxes/<key>. No isolation: this is the fake the
@@ -43,7 +43,7 @@ export const makeLocalSandboxes = (base: string): Sandboxes["Service"] => {
           await mkdir(dirname(box(spec.key)), { recursive: true })
           await cp(copy(spec.key), box(spec.key), { recursive: true })
         }
-        return { root: box(spec.key) }
+        return { root: box(spec.key), repos: spec.repos.map((r) => ({ url: r.url, path: join(box(spec.key), repoDir(r.url)) })) }
       }, true),
     exec: (key, request) =>
       attempt(async () => {

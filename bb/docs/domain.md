@@ -61,7 +61,8 @@ A reply in Multica is a *new task* carrying the previous session id. It resolves
 Each conversation (session) has a **workspace**: bb's copy of the issue's repositories, and a **sandbox** the agent works in (`Sandboxes` port). The sandbox is an agent-sandbox SandboxClaim from a warm pool in Kubernetes, and a local directory in tests.
 
 1. `start` opens the workspace (idempotent per key `wrk_<session>`): clone into bb's copy, claim the sandbox, copy the tree in. It registers the workspace with OpenCode, and the session is located in it.
-2. Every tool runs in the sandbox. Commands go through OpenCode's workspace provider (`opencode/workspace.ts`) and the `shell` plugin (`opencode/sandbox-shell.ts`, needed because OpenCode's own shell writes to the host's disk). File reads and writes go to the sandbox's files.
+2. Every tool runs in the sandbox. OpenCode's workspace provider (`opencode/workspace.ts`) sends its processes and file reads and writes there. A plugin (`opencode/sandbox-tools.ts`) replaces how three tools run, keeping their names and schemas: `shell`, because OpenCode's own writes command output to the host's disk; and `glob` and `grep`, because OpenCode's own look for `rg` on the host. They use the sandbox's own `rg`.
+   The brief tells the agent where each repository is (`Sandboxes.open` returns the paths).
 3. When the run's result arrives, `sync` copies the sandbox's changes back into bb's copy. The changed paths are reported as a `text` event before the result. If the sync fails, the batch is retried and the result is not reported early.
 4. A reply (same session) continues in the same workspace.
 

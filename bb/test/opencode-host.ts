@@ -13,16 +13,20 @@ export const scriptedSetup = (): ModelSetup =>
 /**
  * A real OpenCode host (the Bun profile of @opencode/sdk, Effect API) with its own
  * temp database, on the given model setup (the scripted model by default), with
- * bb's sandbox workspace provider when sandboxes are given. Counts model calls so
- * tests can assert "one run".
+ * bb's sandbox workspace provider when sandboxes are given. Counts (and keeps) model
+ * calls so tests can assert "one run" and what the model was told.
  */
 export const makeOpenCodeHost = async (setup: ModelSetup = scriptedSetup(), sandboxes?: Sandboxes["Service"]) => {
   const dir = mkdtempSync(join(tmpdir(), "bb-opencode-"))
   writeFileSync(join(dir, "opencode.json"), JSON.stringify({ providers: setup.providers, model: setup.model }))
   let modelCalls = 0
+  const bodies: Array<string> = []
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = new Request(input, init)
-    if (request.method === "POST" && request.url.endsWith("/v1/messages")) modelCalls++
+    if (request.method === "POST" && request.url.endsWith("/v1/messages")) {
+      modelCalls++
+      bodies.push(await request.clone().text())
+    }
     return setup.fetch(request)
   }
   const scope = await Effect.runPromise(Scope.make())
@@ -39,5 +43,5 @@ export const makeOpenCodeHost = async (setup: ModelSetup = scriptedSetup(), sand
       scope
     )
   )
-  return { host, dir, ref: setup.ref, modelCalls: () => modelCalls, close: () => Effect.runPromise(Scope.close(scope, Exit.void)) }
+  return { host, dir, ref: setup.ref, modelCalls: () => modelCalls, modelRequests: () => bodies, close: () => Effect.runPromise(Scope.close(scope, Exit.void)) }
 }

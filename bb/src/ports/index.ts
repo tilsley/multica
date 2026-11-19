@@ -131,6 +131,12 @@ export interface WorkspaceSpec {
   readonly repos: ReadonlyArray<{ readonly url: string; readonly ref?: string | undefined }>
 }
 
+export interface OpenedWorkspace {
+  readonly root: string
+  /** Each repository's directory inside the sandbox (absolute), in the spec's order. */
+  readonly repos: ReadonlyArray<{ readonly url: string; readonly path: string }>
+}
+
 export interface ExecRequest {
   readonly argv: ReadonlyArray<string>
   /** Absolute, inside the sandbox. Defaults to the workspace root. */
@@ -155,8 +161,8 @@ export interface ExecResult {
 export class Sandboxes extends Context.Service<
   Sandboxes,
   {
-    /** Returns the workspace root inside the sandbox (where the repositories are). */
-    readonly open: (spec: WorkspaceSpec) => Effect.Effect<{ readonly root: string }, SandboxError>
+    /** The workspace root inside the sandbox, and where each repository is in it. */
+    readonly open: (spec: WorkspaceSpec) => Effect.Effect<OpenedWorkspace, SandboxError>
     readonly exec: (key: string, request: ExecRequest) => Effect.Effect<ExecResult, SandboxError>
     /** `undefined` when the file does not exist. */
     readonly readFile: (key: string, path: string) => Effect.Effect<Uint8Array | undefined, SandboxError>

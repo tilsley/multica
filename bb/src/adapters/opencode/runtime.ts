@@ -1,7 +1,7 @@
 import type { OpenCode } from "@opencode/sdk/effect"
 import { Clock, Effect, Schema, Stream } from "effect"
 import type { AgentEvent } from "../../domain/index.ts"
-import { type AgentRuntime, RuntimeError, type Sandboxes, type SandboxError } from "../../ports/index.ts"
+import { type AgentRuntime, type OpenedWorkspace, RuntimeError, type Sandboxes, type SandboxError } from "../../ports/index.ts"
 import { initialState, mapLog, MapState, promptStart } from "./events.ts"
 import * as Id from "./ids.ts"
 import { providerName } from "./workspace.ts"
@@ -58,9 +58,22 @@ const runtimeError = (retryable: boolean) => (e: unknown) =>
 
 const sandboxError = (e: SandboxError) => new RuntimeError({ reason: `sandbox: ${e.reason}`, retryable: e.retryable })
 
-/** The Multica brief (system prompt) travels with the prompt: OpenCode has no per-turn system field. */
-const promptText = (prompt: string, systemPrompt: string | undefined) =>
-  systemPrompt ? `<multica-runtime-brief>\n${systemPrompt}\n</multica-runtime-brief>\n\n${prompt}` : prompt
+/** Where the agent's repositories are, so it does not have to search for them. */
+export const workspaceNote = (opened: OpenedWorkspace): string => {
+  const repos = opened.repos.map((r) => `- ${r.path} (${r.url})`).join("\n")
+  return opened.repos.length === 0
+    ? `Your workspace is ${opened.root}. It has no repositories checked out.`
+    : `Your workspace is ${opened.root}. The repositories are checked out there:\n${repos}`
+}
+
+/**
+ * The Multica brief (system prompt) and the workspace note travel with the prompt:
+ * OpenCode has no per-turn system field.
+ */
+const promptText = (prompt: string, systemPrompt: string | undefined, note: string | undefined) => {
+  const brief = [systemPrompt, note].filter((s): s is string => s !== undefined && s !== "").join("\n\n")
+  return brief ? `<multica-runtime-brief>\n${brief}\n</multica-runtime-brief>\n\n${prompt}` : prompt
+}
 
 const lastSeq = (items: ReadonlyArray<unknown>) => mapLog(items, initialState(0)).state.seq
 
@@ -85,14 +98,14 @@ export const makeOpenCodeRuntime = (options: OpenCodeRuntimeOptions): AgentRunti
       )
     )
 
-  /** Opens the conversation's workspace and registers it with OpenCode; returns its root. */
+  /** Opens the conversation's workspace and registers it with OpenCode. */
   const openWorkspace = (sandboxes: Sandboxes["Service"], key: string, repos: ReadonlyArray<{ readonly url: string; readonly ref?: string | undefined }>) =>
     Effect.gen(function* () {
-      const { root } = yield* sandboxes.open({ key, repos }).pipe(Effect.mapError(sandboxError))
+      const opened = yield* sandboxes.open({ key, repos }).pipe(Effect.mapError(sandboxError))
       const id = yield* Id.workspaceID(key)
       yield* withHost((oc) => oc.workspace.create({ id, provider: providerName }))
       yield* withHost((oc) => oc.workspace.provision({ workspaceID: id }))
-      return root
+      return opened
     })
 
   return {
@@ -102,9 +115,8 @@ export const makeOpenCodeRuntime = (options: OpenCodeRuntimeOptions): AgentRunti
         const sessionID = yield* Id.sessionID(sessionId)
         const promptId = yield* Id.messageID(promptIdFor(runId))
         const workspace = options.sandboxes ? workspaceKeyFor(sessionId) : undefined
-        const root = yield* Id.absolutePath(
-          options.sandboxes && workspace ? yield* openWorkspace(options.sandboxes, workspace, request.repos ?? []) : options.directory
-        )
+        const opened = options.sandboxes && workspace ? yield* openWorkspace(options.sandboxes, workspace, request.repos ?? []) : undefined
+        const root = yield* Id.absolutePath(opened?.root ?? options.directory)
         const location = workspace ? { directory: root, workspaceID: yield* Id.workspaceID(workspace) } : { directory: root }
         const model = yield* Id.modelRef(options.model)
         const exists = yield* withHost((oc) => oc.sessions.get({ sessionID })).pipe(
@@ -129,7 +141,7 @@ export const makeOpenCodeRuntime = (options: OpenCodeRuntimeOptions): AgentRunti
         const before = sent ?? lastSeq(log)
         if (sent === undefined) {
           yield* withHost((oc) =>
-            oc.sessions.prompt({ sessionID, id: promptId, text: promptText(request.prompt, request.systemPrompt) })
+            oc.sessions.prompt({ sessionID, id: promptId, text: promptText(request.prompt, request.systemPrompt, opened ? workspaceNote(opened) : undefined) })
           )
         }
         const cursor: Cursor = { sessionId, beat: now, map: initialState(before), ...(workspace ? { workspace } : {}) }

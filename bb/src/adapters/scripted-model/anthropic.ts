@@ -50,8 +50,20 @@ const toolResults = (body: unknown): string | undefined => {
   return results.map((r) => (isObject(r) ? text(r.content) : "")).join("\n")
 }
 
-/** `run: <command>` in the task asks the scripted model to run that shell command. */
-const scriptedCommand = (body: unknown): string | undefined => /^run: (.+)$/m.exec(lastUserText(body))?.[1]?.trim()
+/**
+ * A tool call the task asks the scripted model to make, from its first directive line:
+ *   run: <command>   OpenCode's shell
+ *   glob: <pattern>  OpenCode's glob
+ *   grep: <pattern>  OpenCode's grep
+ */
+const scriptedCall = (body: unknown): { readonly tool: string; readonly input: Record<string, string>; readonly said: string } | undefined => {
+  const m = /^(run|glob|grep): (.+)$/m.exec(lastUserText(body))
+  const arg = m?.[2]?.trim()
+  if (!m || !arg) return undefined
+  if (m[1] === "run") return { tool: "shell", input: { command: arg }, said: `Ran \`${arg}\`` }
+  if (m[1] === "glob") return { tool: "glob", input: { pattern: arg }, said: `Files matching \`${arg}\`` }
+  return { tool: "grep", input: { pattern: arg }, said: `Matches for \`${arg}\`` }
+}
 
 /** The scripted reply for a request: acknowledges the task in a stable, testable form. */
 export const scriptedReply = (body: unknown): string => {
@@ -77,22 +89,22 @@ const messageStream = (text: string, model: string) =>
     stop("end_turn", text.split(" ").length)
   ].join("")
 
-/** One call of OpenCode's `shell` tool. */
-const shellStream = (command: string, model: string) =>
+/** One call of an OpenCode tool. */
+const toolStream = (tool: string, input: Record<string, string>, model: string) =>
   [
     start(model),
-    frame("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_scripted", name: "shell", input: {} } }),
-    frame("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: JSON.stringify({ command }) } }),
+    frame("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_scripted", name: tool, input: {} } }),
+    frame("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: JSON.stringify(input) } }),
     frame("content_block_stop", { type: "content_block_stop", index: 0 }),
     stop("tool_use", 10)
   ].join("")
 
-/** What the scripted model says next: run the task's command first, then report it. */
+/** What the scripted model says next: make the task's tool call first, then report it. */
 const scriptedTurn = (body: unknown, model: string): string => {
-  const command = scriptedCommand(body)
+  const call = scriptedCall(body)
   const output = toolResults(body)
-  if (command !== undefined && output === undefined) return shellStream(command, model)
-  if (command !== undefined && output !== undefined) return messageStream(`Ran \`${command}\`:\n${output.trim()}`, model)
+  if (call !== undefined && output === undefined) return toolStream(call.tool, call.input, model)
+  if (call !== undefined && output !== undefined) return messageStream(`${call.said}:\n${output.trim()}`, model)
   return messageStream(scriptedReply(body), model)
 }
 

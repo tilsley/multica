@@ -71,6 +71,8 @@ jobs:
           go-version-file: upstream/server/go.mod
           cache-dependency-path: upstream/server/go.sum
       - run: bun install --frozen-lockfile
+      - name: ripgrep (the sandbox tests search with it, as the sandbox image does)
+        run: command -v rg || (sudo apt-get update -q && sudo apt-get install -y -q ripgrep)
       - name: verify (typecheck, lint, knip, tests)
         run: bun run verify
       - name: Postgres mailbox contract
